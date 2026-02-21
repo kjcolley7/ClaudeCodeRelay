@@ -18,6 +18,7 @@ const OAUTH_SCOPES =
   "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers";
 
 let pendingCodeVerifier: string | null = null;
+let pendingState: string | null = null;
 
 function base64url(buf: Buffer): string {
   return buf.toString("base64url");
@@ -166,6 +167,7 @@ const server = http.createServer((req, res) => {
     const oauthUrl = buildOAuthUrl(codeChallenge, state);
 
     pendingCodeVerifier = codeVerifier;
+    pendingState = state;
 
     logger.info("Generated OAuth PKCE login URL");
     jsonResponse(res, 200, { oauthUrl });
@@ -198,25 +200,28 @@ const server = http.createServer((req, res) => {
       const rawCode = payload.code.trim();
       const hashIdx = rawCode.indexOf("#");
       const authorizationCode = hashIdx >= 0 ? rawCode.slice(0, hashIdx) : rawCode;
+      const stateFromCode = hashIdx >= 0 ? rawCode.slice(hashIdx + 1) : pendingState;
       const codeVerifier = pendingCodeVerifier;
       pendingCodeVerifier = null;
+      pendingState = null;
 
       logger.info("Exchanging auth code for tokens");
 
       try {
-        // Exchange the authorization code for tokens
-        const tokenBody = new URLSearchParams({
+        // Exchange the authorization code for tokens (JSON body, not form-encoded)
+        const tokenBody = JSON.stringify({
           grant_type: "authorization_code",
           code: authorizationCode,
           redirect_uri: OAUTH_REDIRECT_URI,
           client_id: OAUTH_CLIENT_ID,
           code_verifier: codeVerifier,
-        }).toString();
+          state: stateFromCode,
+        });
 
         const tokenRes = await httpsPost(
           OAUTH_TOKEN_URL,
           tokenBody,
-          "application/x-www-form-urlencoded"
+          "application/json"
         );
 
         logger.info(
