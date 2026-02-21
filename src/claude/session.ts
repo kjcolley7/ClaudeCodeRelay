@@ -1,9 +1,48 @@
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { config } from "../config.js";
+import { logger } from "../utils/logger.js";
+
+const SESSIONS_FILE = join(config.authDir, "sessions.json");
+
 interface ChatSession {
   sessionId?: string;
   mutex: Promise<void>;
 }
 
 const sessions = new Map<string, ChatSession>();
+
+/** Load persisted session IDs from disk on startup */
+function loadSessions(): void {
+  try {
+    const data = JSON.parse(readFileSync(SESSIONS_FILE, "utf-8"));
+    for (const [jid, sessionId] of Object.entries(data)) {
+      if (typeof sessionId === "string") {
+        getOrCreate(jid).sessionId = sessionId;
+      }
+    }
+    logger.info({ count: Object.keys(data).length }, "Restored sessions from disk");
+  } catch {
+    // File doesn't exist or is invalid — start fresh
+  }
+}
+
+/** Persist session IDs to disk */
+function saveSessions(): void {
+  const data: Record<string, string> = {};
+  for (const [jid, session] of sessions) {
+    if (session.sessionId) {
+      data[jid] = session.sessionId;
+    }
+  }
+  try {
+    writeFileSync(SESSIONS_FILE, JSON.stringify(data), "utf-8");
+  } catch (err) {
+    logger.error({ err }, "Failed to persist sessions");
+  }
+}
+
+loadSessions();
 
 function getOrCreate(jid: string): ChatSession {
   let session = sessions.get(jid);
@@ -20,10 +59,12 @@ export function getSessionId(jid: string): string | undefined {
 
 export function setSessionId(jid: string, sessionId: string): void {
   getOrCreate(jid).sessionId = sessionId;
+  saveSessions();
 }
 
 export function resetSession(jid: string): void {
   sessions.delete(jid);
+  saveSessions();
 }
 
 export function activeSessionCount(): number {
