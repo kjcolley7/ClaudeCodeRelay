@@ -5,6 +5,7 @@ import { getSessionId, setSessionId, withLock } from "../claude/session.js";
 import { handleCommand } from "./commands.js";
 import { splitMessage } from "../utils/split.js";
 import { trackSentMessage } from "../whatsapp/client.js";
+import { isAwaitingAuth, handleAuthCode, initiateAuth } from "./auth.js";
 
 /** Send a text message and track its ID so we don't process our own messages */
 async function sendText(
@@ -26,6 +27,18 @@ export async function handleMessage(
   msg: WAMessage
 ): Promise<void> {
   logger.info({ jid, textLen: text.length }, "Received message");
+
+  // Handle /login command
+  if (text.trim().toLowerCase() === "/login") {
+    await initiateAuth(sock, jid);
+    return;
+  }
+
+  // If awaiting auth code, treat message as the code
+  if (isAwaitingAuth()) {
+    await handleAuthCode(text, sock, jid);
+    return;
+  }
 
   // Check for slash commands
   if (text.startsWith("/")) {

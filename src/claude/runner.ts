@@ -9,6 +9,120 @@ export interface ClaudeResult {
   sessionId: string;
 }
 
+// --- Auth types ---
+
+export interface AuthStatus {
+  authenticated: boolean;
+  account?: string;
+  plan?: string;
+  [key: string]: unknown;
+}
+
+export interface AuthLoginResult {
+  oauthUrl: string;
+}
+
+export interface AuthCallbackResult {
+  loginExitCode: number | null;
+  status: AuthStatus | null;
+}
+
+// --- Auth functions ---
+
+function authRequest(
+  method: string,
+  path: string,
+  body?: unknown
+): Promise<unknown> {
+  if (config.claudeServiceUrl) {
+    return authRequestRemote(method, path, body);
+  }
+  throw new Error("Auth functions require CLAUDE_SERVICE_URL (bridge mode)");
+}
+
+function authRequestRemote(
+  method: string,
+  path: string,
+  body?: unknown
+): Promise<unknown> {
+  const url = new URL(path, config.claudeServiceUrl);
+  const payload = body ? JSON.stringify(body) : undefined;
+
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      url,
+      {
+        method,
+        headers: {
+          ...(payload
+            ? {
+                "Content-Type": "application/json",
+                "Content-Length": Buffer.byteLength(payload),
+              }
+            : {}),
+        },
+      },
+      (res) => {
+        let data = "";
+        res.on("data", (chunk: Buffer) => {
+          data += chunk.toString();
+        });
+        res.on("end", () => {
+          try {
+            const parsed = JSON.parse(data);
+            if (res.statusCode && res.statusCode >= 400) {
+              reject(
+                new Error(
+                  parsed.error ?? `Bridge returned ${res.statusCode}`
+                )
+              );
+            } else {
+              resolve(parsed);
+            }
+          } catch {
+            reject(new Error(`Invalid JSON from bridge: ${data.slice(0, 200)}`));
+          }
+        });
+      }
+    );
+
+    req.on("error", (err) => {
+      reject(new Error(`Bridge request failed: ${err.message}`));
+    });
+
+    if (payload) req.write(payload);
+    req.end();
+  });
+}
+
+export async function checkAuthStatus(): Promise<AuthStatus> {
+  const result = (await authRequest("GET", "/auth/status")) as AuthStatus;
+  logger.info({ authenticated: result.authenticated }, "Auth status checked");
+  return result;
+}
+
+export async function startAuthLogin(): Promise<AuthLoginResult> {
+  const result = (await authRequest(
+    "POST",
+    "/auth/login"
+  )) as AuthLoginResult;
+  logger.info("Auth login started, OAuth URL received");
+  return result;
+}
+
+export async function submitAuthCode(
+  code: string
+): Promise<AuthCallbackResult> {
+  const result = (await authRequest("POST", "/auth/code", {
+    code,
+  })) as AuthCallbackResult;
+  logger.info(
+    { loginExitCode: result.loginExitCode },
+    "Auth code submitted"
+  );
+  return result;
+}
+
 export async function runClaude(
   prompt: string,
   sessionId?: string,

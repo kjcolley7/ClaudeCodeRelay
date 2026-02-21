@@ -17,6 +17,7 @@ export function handleCommand(jid: string, text: string): CommandResult {
         "/help — Show this message",
         "/status — Show session info",
         "/reset — Clear conversation history",
+        "/login — Authenticate Claude Code",
       ].join("\n"),
     };
   }

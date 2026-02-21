@@ -1,14 +1,230 @@
 import http from "node:http";
-import { spawn } from "node:child_process";
+import { spawn, ChildProcess } from "node:child_process";
 import { config } from "../config.js";
 import { logger } from "../utils/logger.js";
 
+// Module-level state for the running auth login process
+let authProc: ChildProcess | null = null;
+let authTimer: ReturnType<typeof setTimeout> | null = null;
+
+function cleanupAuthProc(): void {
+  if (authTimer) {
+    clearTimeout(authTimer);
+    authTimer = null;
+  }
+  if (authProc && !authProc.killed) {
+    authProc.kill("SIGTERM");
+  }
+  authProc = null;
+}
+
+function readBody(req: http.IncomingMessage): Promise<string> {
+  return new Promise((resolve) => {
+    let body = "";
+    req.on("data", (chunk: Buffer) => {
+      body += chunk.toString();
+    });
+    req.on("end", () => resolve(body));
+  });
+}
+
+function jsonResponse(
+  res: http.ServerResponse,
+  status: number,
+  data: unknown
+): void {
+  res.writeHead(status, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(data));
+}
+
 const server = http.createServer((req, res) => {
   if (req.method === "GET" && req.url === "/health") {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ status: "ok" }));
+    jsonResponse(res, 200, { status: "ok" });
     return;
   }
+
+  // --- Auth endpoints ---
+
+  if (req.method === "GET" && req.url === "/auth/status") {
+    const proc = spawn("claude", ["auth", "status", "--json"], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let stdout = "";
+    let stderr = "";
+    proc.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+    proc.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+
+    proc.on("close", (code) => {
+      try {
+        const parsed = JSON.parse(stdout);
+        jsonResponse(res, 200, parsed);
+      } catch {
+        logger.error(
+          { code, stdout: stdout.slice(0, 500), stderr: stderr.slice(0, 500) },
+          "Failed to parse auth status"
+        );
+        jsonResponse(res, 500, {
+          error: "Failed to parse auth status",
+          stdout: stdout.slice(0, 500),
+        });
+      }
+    });
+
+    proc.on("error", (err) => {
+      logger.error({ err }, "Failed to spawn claude auth status");
+      jsonResponse(res, 500, { error: err.message });
+    });
+    return;
+  }
+
+  if (req.method === "POST" && req.url === "/auth/login") {
+    // Kill any existing auth process
+    cleanupAuthProc();
+
+    logger.info("Starting claude auth login");
+
+    authProc = spawn("claude", ["auth", "login"], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    let oauthUrl = "";
+    let output = "";
+    let responded = false;
+
+    const sendUrl = () => {
+      if (responded || !oauthUrl) return;
+      responded = true;
+      jsonResponse(res, 200, { oauthUrl });
+    };
+
+    // 5-minute timeout for the auth process
+    authTimer = setTimeout(() => {
+      logger.warn("Auth login process timed out");
+      cleanupAuthProc();
+      if (!responded) {
+        responded = true;
+        jsonResponse(res, 504, { error: "Auth login timed out" });
+      }
+    }, 5 * 60 * 1000);
+
+    const handleOutput = (chunk: Buffer) => {
+      const text = chunk.toString();
+      output += text;
+      // Look for URL in output
+      const urlMatch = output.match(/(https?:\/\/[^\s]+)/);
+      if (urlMatch && !oauthUrl) {
+        oauthUrl = urlMatch[1];
+        logger.info({ oauthUrl }, "Captured OAuth URL");
+        sendUrl();
+      }
+    };
+
+    authProc.stdout?.on("data", handleOutput);
+    authProc.stderr?.on("data", handleOutput);
+
+    authProc.on("error", (err) => {
+      logger.error({ err }, "Auth login process error");
+      cleanupAuthProc();
+      if (!responded) {
+        responded = true;
+        jsonResponse(res, 500, { error: err.message });
+      }
+    });
+
+    authProc.on("close", (code) => {
+      logger.info({ code }, "Auth login process exited");
+      if (authTimer) {
+        clearTimeout(authTimer);
+        authTimer = null;
+      }
+      authProc = null;
+      if (!responded) {
+        responded = true;
+        jsonResponse(res, 500, {
+          error: "Auth process exited before providing URL",
+          output: output.slice(0, 1000),
+        });
+      }
+    });
+    return;
+  }
+
+  if (req.method === "POST" && req.url === "/auth/code") {
+    readBody(req).then((body) => {
+      let payload: { code: string };
+      try {
+        payload = JSON.parse(body);
+      } catch {
+        jsonResponse(res, 400, { error: "Invalid JSON" });
+        return;
+      }
+
+      if (!payload.code) {
+        jsonResponse(res, 400, { error: "Missing code" });
+        return;
+      }
+
+      if (!authProc || authProc.killed || !authProc.stdin?.writable) {
+        jsonResponse(res, 409, {
+          error: "No auth login process running. Call POST /auth/login first.",
+        });
+        return;
+      }
+
+      logger.info("Writing auth code to login process stdin");
+      authProc.stdin.write(payload.code + "\n");
+
+      // Wait for the auth process to exit
+      authProc.on("close", (code) => {
+        if (authTimer) {
+          clearTimeout(authTimer);
+          authTimer = null;
+        }
+        authProc = null;
+
+        logger.info({ code }, "Auth login process completed after code submission");
+
+        // Check auth status
+        const statusProc = spawn("claude", ["auth", "status", "--json"], {
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+
+        let stdout = "";
+        statusProc.stdout.on("data", (chunk: Buffer) => {
+          stdout += chunk.toString();
+        });
+
+        statusProc.on("close", () => {
+          try {
+            const parsed = JSON.parse(stdout);
+            jsonResponse(res, 200, { loginExitCode: code, status: parsed });
+          } catch {
+            jsonResponse(res, 200, {
+              loginExitCode: code,
+              status: null,
+              statusRaw: stdout.slice(0, 500),
+            });
+          }
+        });
+
+        statusProc.on("error", (err) => {
+          jsonResponse(res, 200, {
+            loginExitCode: code,
+            status: null,
+            error: err.message,
+          });
+        });
+      });
+    });
+    return;
+  }
+
+  // --- Invoke endpoint ---
 
   if (req.method === "POST" && req.url === "/invoke") {
     let body = "";
@@ -108,8 +324,7 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  res.writeHead(404, { "Content-Type": "application/json" });
-  res.end(JSON.stringify({ error: "Not found" }));
+  jsonResponse(res, 404, { error: "Not found" });
 });
 
 const port = config.bridgePort;
