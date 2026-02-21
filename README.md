@@ -1,85 +1,99 @@
 # ClaudeCodeRelay
 
-Relay WhatsApp messages to a Claude Code CLI instance. Designed for interacting with Claude Code from airplane "free texting" wifi, where WhatsApp works but full internet doesn't.
+Chat with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) through WhatsApp. Designed for situations where you have text-only connectivity (like airplane wifi with free messaging) but still want access to Claude Code.
 
-## Architecture
+## How It Works
 
-```
-Phone (airplane wifi) → WhatsApp → WhatsApp Servers →
-  Server → Baileys → Message Handler →
-    Claude Code CLI subprocess →
-      Response → Baileys → WhatsApp → Phone
-```
+ClaudeCodeRelay runs two Docker containers on a server with internet access:
 
-## Setup
+- A **relay** container that connects to WhatsApp via [Baileys](https://github.com/WhiskeySockets/Baileys)
+- A **claude** container that runs the Claude Code CLI
 
-1. Install dependencies:
+You link the relay to your WhatsApp account, then send messages to yourself (self-chat). The relay forwards them to Claude Code and sends the responses back.
+
+## Getting Started
+
+### Prerequisites
+
+- Docker and Docker Compose
+- A WhatsApp account
+- An [Anthropic](https://www.anthropic.com/) account with a Claude Pro/Max/Team/Enterprise subscription
+
+### Setup
+
+1. Clone the repo and build:
    ```bash
-   npm install
+   git clone https://github.com/kjcolley7/ClaudeCodeRelay.git
+   cd ClaudeCodeRelay
+   docker compose build
    ```
 
 2. Start the relay:
    ```bash
-   npm run dev    # development (tsx watch)
-   npm run build && npm start  # production
+   docker compose up
    ```
 
-3. Scan the QR code displayed in the terminal with WhatsApp on your phone (Linked Devices).
+3. A QR code will appear in your terminal. Scan it with WhatsApp (**Settings > Linked Devices > Link a Device**).
 
-## Usage
+4. Once connected, the relay checks if Claude Code is authenticated. If not, it sends you an OAuth link via WhatsApp. Open the link on your phone, log in with your Anthropic account, and paste the resulting authentication code back into the chat.
 
-Send a message to yourself (self-chat) from the linked WhatsApp account. The relay only processes messages with `fromMe=true`, so it responds to your own messages and ignores everything else.
+5. You're ready to go. Send a message to yourself and Claude Code will respond.
 
-### Commands
+## Commands
 
-- `/help` — Show available commands
-- `/status` — Show current session info
-- `/reset` — Clear conversation history and start fresh
+| Command | Description |
+|---------|-------------|
+| `/help` | Show available commands |
+| `/status` | Show session info, token usage, and account details |
+| `/reset` | Clear conversation history and start fresh |
+| `/login` | Authenticate or re-authenticate with Anthropic |
 
-### Features
+Any message that doesn't start with `/` (or uses an unrecognized command) is forwarded to Claude Code.
 
-- **Conversation continuity** — Messages within a chat maintain context via Claude Code session IDs
-- **Per-chat concurrency control** — Messages queue per-chat to prevent session corruption; different chats run in parallel
-- **Auto-reconnection** — Reconnects automatically on disconnect (re-scan QR if logged out)
-- **Message splitting** — Long responses split at paragraph/line/sentence boundaries with code fence repair
+## Features
+
+- **Conversation continuity** — Each chat maintains context across messages via Claude Code session IDs, persisted to disk so conversations survive restarts
+- **Interactive authentication** — Full OAuth PKCE login flow through WhatsApp, with automatic prompting on startup if not logged in
 - **Typing indicators** — Shows "composing" while Claude is working
+- **Message splitting** — Long responses are split at natural boundaries (paragraphs, lines, sentences) with automatic code fence repair across chunks
+- **Session recovery** — Automatically starts a fresh session if a saved session is no longer valid
 
-## Docker
+## Configuration
 
-A two-container setup is available via Docker Compose:
+Environment variables can be set in a `.env` file or passed directly to `docker compose`.
 
-- **relay** — WhatsApp/Baileys relay (Node.js)
-- **claude** — HTTP bridge server that spawns the Claude Code CLI
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CLAUDE_TIMEOUT` | `300` | Maximum time (seconds) for a single Claude Code invocation |
+| `MAX_MESSAGE_LENGTH` | `4000` | Maximum characters per WhatsApp message chunk |
+| `LOG_LEVEL` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
+| `BAILEYS_LOG_LEVEL` | `error` | Log level for the Baileys WhatsApp library |
 
-### Quick start
-
-1. Build the containers:
-   ```bash
-   docker compose build
-   ```
-
-2. Authenticate Claude Code (one-time):
-   ```bash
-   docker compose run claude claude auth login
-   ```
-
-3. Start the relay:
-   ```bash
-   docker compose run relay
-   ```
-   Scan the QR code with WhatsApp, then messages will flow through.
-
-### Architecture
+## Architecture
 
 ```
-relay container                      claude container
-┌──────────────────┐   HTTP stream   ┌─────────────────────┐
-│ WhatsApp/Baileys │───────────────►│ bridge server :3100  │
-│ runner.ts        │◄───────────────│ spawns `claude` CLI  │
-│ vol: auth_info   │   NDJSON lines  │ vol: /home/claude    │
-└──────────────────┘                 └─────────────────────┘
+relay container                       claude container
+┌───────────────────┐   HTTP stream   ┌──────────────────────┐
+│ WhatsApp/Baileys  │────────────────►│ Bridge server :3100  │
+│                   │◄────────────────│                      │
+│ Session manager   │   NDJSON lines  │ POST /invoke         │
+│ Message routing   │                 │ GET  /auth/status    │
+│ Auth flow         │                 │ POST /auth/login     │
+│                   │                 │ POST /auth/code      │
+└───────────────────┘                 └──────────────────────┘
+  vol: auth_info                        vol: claude_home
+  (WhatsApp creds)                      (Claude creds + workspace)
 ```
 
-- The relay container sends prompts via HTTP POST to the claude container's bridge server
-- The bridge streams back NDJSON events (same format as `claude --output-format stream-json`)
-- A single `claude_home` Docker volume is mounted at `/home/claude`, serving as both the home directory (for Claude Code credentials) and the workspace
+The relay sends prompts to the bridge via `POST /invoke`. The bridge spawns the `claude` CLI and streams NDJSON events back over the HTTP response. Auth endpoints handle the OAuth PKCE flow.
+
+Both containers communicate over an internal Docker network with no ports exposed to the host.
+
+## Security Notes
+
+- The relay only processes messages with `fromMe=true` — it ignores messages from other people
+- WhatsApp credentials are stored in the `auth_info` Docker volume
+- Claude Code credentials are stored in the `claude_home` Docker volume
+- Claude Code runs inside a Docker container, isolated from the host. By default it uses a blank named volume as its workspace, but you can modify `docker-compose.yml` to bind-mount a host directory instead
+- No ports are exposed to the host; the containers communicate over an internal network
+- If WhatsApp logs you out, the relay exits and you'll need to re-link by scanning a new QR code
