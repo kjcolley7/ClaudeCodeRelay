@@ -13,7 +13,7 @@ export function handleCommand(jid: string, text: string): CommandResult {
     return {
       handled: true,
       response: [
-        "*ClaudeRelay Commands*",
+        "*ClaudeCodeRelay Commands*",
         "/help — Show this message",
         "/status — Show session info",
         "/reset — Clear conversation history",

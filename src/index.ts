@@ -9,7 +9,7 @@ async function main(): Promise<void> {
       workingDirectory: config.workingDirectory,
       allowedNumbers: [...config.allowedNumbers],
     },
-    "Starting ClaudeRelay"
+    "Starting ClaudeCodeRelay"
   );
 
   onMessage(handleMessage);

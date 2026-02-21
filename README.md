@@ -1,4 +1,4 @@
-# ClaudeRelay
+# ClaudeCodeRelay
 
 Relay WhatsApp messages to a Claude Code CLI instance. Designed for interacting with Claude Code from airplane "free texting" wifi, where WhatsApp works but full internet doesn't.
 

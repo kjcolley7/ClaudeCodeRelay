@@ -1,5 +1,5 @@
 {
-  "name": "claude-relay",
+  "name": "claude-code-relay",
   "version": "1.0.0",
   "description": "Relay WhatsApp messages to Claude Code CLI",
   "type": "module",
