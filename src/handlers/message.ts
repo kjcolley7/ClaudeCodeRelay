@@ -1,11 +1,12 @@
 import { WASocket, WAMessage } from "@whiskeysockets/baileys";
 import { logger } from "../utils/logger.js";
-import { runClaude, ClaudeSessionError } from "../claude/runner.js";
-import { getSessionId, setSessionId, resetSession, withLock } from "../claude/session.js";
+import { runClaude, ClaudeSessionError, checkAuthStatus } from "../claude/runner.js";
+import { getSessionId, setSessionId, resetSession, addUsage, getUsage, withLock } from "../claude/session.js";
 import { handleCommand } from "./commands.js";
 import { splitMessage } from "../utils/split.js";
 import { trackSentMessage } from "../whatsapp/client.js";
 import { isAwaitingAuth, handleAuthCode, initiateAuth } from "./auth.js";
+import { config } from "../config.js";
 
 /** Send a text message and track its ID so we don't process our own messages */
 async function sendText(
@@ -31,6 +32,12 @@ export async function handleMessage(
   // Handle /login command
   if (text.trim().toLowerCase() === "/login") {
     await initiateAuth(sock, jid);
+    return;
+  }
+
+  // Handle /status command (async — needs bridge call)
+  if (text.trim().toLowerCase() === "/status") {
+    await handleStatus(jid, sock, msg);
     return;
   }
 
@@ -92,6 +99,11 @@ export async function handleMessage(
         setSessionId(jid, result.sessionId);
       }
 
+      // Track token usage
+      if (result.usage) {
+        addUsage(jid, result.usage.inputTokens, result.usage.outputTokens, result.usage.costUsd);
+      }
+
       // Clear typing
       clearInterval(typingInterval);
       try {
@@ -125,6 +137,50 @@ export async function handleMessage(
       await sendText(sock, jid, `Error: ${errMsg}`, msg);
     }
   });
+}
+
+async function handleStatus(
+  jid: string,
+  sock: WASocket,
+  msg: WAMessage
+): Promise<void> {
+  const lines: string[] = ["*Status*"];
+
+  // Session info
+  const sessionId = getSessionId(jid);
+  lines.push(`Session: ${sessionId ?? "none"}`);
+
+  // Usage for this session
+  const usage = getUsage(jid);
+  if (usage.inputTokens > 0 || usage.outputTokens > 0) {
+    lines.push(
+      `Tokens: ${usage.inputTokens.toLocaleString()} in / ${usage.outputTokens.toLocaleString()} out`
+    );
+    if (usage.costUsd > 0) {
+      lines.push(`Cost: $${usage.costUsd.toFixed(4)}`);
+    }
+  }
+
+  lines.push(`Working dir: ${config.workingDirectory}`);
+
+  // Auth status from bridge
+  if (config.claudeServiceUrl) {
+    try {
+      const auth = await checkAuthStatus();
+      if (auth.authenticated) {
+        const account = auth.account ?? "unknown";
+        const plan = auth.plan ?? "unknown";
+        lines.push(`Account: ${account}`);
+        lines.push(`Plan: ${plan}`);
+      } else {
+        lines.push("Auth: not logged in");
+      }
+    } catch {
+      lines.push("Auth: unavailable");
+    }
+  }
+
+  await sendText(sock, jid, lines.join("\n"), msg);
 }
 
 function prompt(text: string): string {

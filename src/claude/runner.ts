@@ -4,9 +4,16 @@ import { createInterface } from "readline";
 import { config } from "../config.js";
 import { logger } from "../utils/logger.js";
 
+export interface ClaudeUsage {
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+}
+
 export interface ClaudeResult {
   text: string;
   sessionId: string;
+  usage?: ClaudeUsage;
 }
 
 export class ClaudeSessionError extends Error {
@@ -175,6 +182,7 @@ async function runClaudeLocal(
     let resultText = "";
     let resultSessionId = sessionId ?? "";
     let errorMessage = "";
+    let resultUsage: ClaudeUsage | undefined;
     const events: unknown[] = [];
     let settled = false;
 
@@ -198,6 +206,13 @@ async function runClaudeLocal(
         if (event.type === "result") {
           resultText = event.result ?? "";
           resultSessionId = event.session_id ?? resultSessionId;
+          if (event.usage) {
+            resultUsage = {
+              inputTokens: (event.usage.input_tokens ?? 0) + (event.usage.cache_read_input_tokens ?? 0),
+              outputTokens: event.usage.output_tokens ?? 0,
+              costUsd: event.total_cost_usd ?? 0,
+            };
+          }
           if (event.is_error) {
             const errors = Array.isArray(event.errors) ? event.errors.join("; ") : "";
             errorMessage = errors || resultText || "Unknown error";
@@ -232,7 +247,7 @@ async function runClaudeLocal(
           { sessionId: resultSessionId, resultLen: resultText.length },
           "Claude finished"
         );
-        resolve({ text: resultText, sessionId: resultSessionId });
+        resolve({ text: resultText, sessionId: resultSessionId, usage: resultUsage });
       }
     });
 
@@ -285,6 +300,7 @@ async function runClaudeRemote(
         let resultText = "";
         let resultSessionId = sessionId ?? "";
         let errorMessage = "";
+        let resultUsage: ClaudeUsage | undefined;
         const events: unknown[] = [];
 
         const rl = createInterface({ input: res });
@@ -299,6 +315,13 @@ async function runClaudeRemote(
             if (event.type === "result") {
               resultText = event.result ?? "";
               resultSessionId = event.session_id ?? resultSessionId;
+              if (event.usage) {
+                resultUsage = {
+                  inputTokens: (event.usage.input_tokens ?? 0) + (event.usage.cache_read_input_tokens ?? 0),
+                  outputTokens: event.usage.output_tokens ?? 0,
+                  costUsd: event.total_cost_usd ?? 0,
+                };
+              }
               if (event.is_error) {
                 const errors = Array.isArray(event.errors) ? event.errors.join("; ") : "";
                 errorMessage = errors || resultText || "Unknown error";
@@ -324,7 +347,7 @@ async function runClaudeRemote(
               { sessionId: resultSessionId, resultLen: resultText.length },
               "Claude finished (remote)"
             );
-            resolve({ text: resultText, sessionId: resultSessionId });
+            resolve({ text: resultText, sessionId: resultSessionId, usage: resultUsage });
           }
         });
       }

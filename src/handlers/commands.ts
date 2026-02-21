@@ -1,5 +1,4 @@
-import { resetSession, getSessionId, activeSessionCount } from "../claude/session.js";
-import { config } from "../config.js";
+import { resetSession } from "../claude/session.js";
 
 export interface CommandResult {
   handled: boolean;
@@ -15,22 +14,9 @@ export function handleCommand(jid: string, text: string): CommandResult {
       response: [
         "*ClaudeCodeRelay Commands*",
         "/help — Show this message",
-        "/status — Show session info",
+        "/status — Show session and auth info",
         "/reset — Clear conversation history",
         "/login — Authenticate Claude Code",
-      ].join("\n"),
-    };
-  }
-
-  if (cmd === "/status") {
-    const sessionId = getSessionId(jid);
-    return {
-      handled: true,
-      response: [
-        "*Status*",
-        `Session: ${sessionId ? sessionId.slice(0, 8) + "..." : "none"}`,
-        `Active chats: ${activeSessionCount()}`,
-        `Working dir: ${config.workingDirectory}`,
       ].join("\n"),
     };
   }

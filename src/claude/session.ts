@@ -5,9 +5,16 @@ import { logger } from "../utils/logger.js";
 
 const SESSIONS_FILE = join(config.authDir, "sessions.json");
 
+export interface SessionUsage {
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+}
+
 interface ChatSession {
   sessionId?: string;
   mutex: Promise<void>;
+  usage: SessionUsage;
 }
 
 const sessions = new Map<string, ChatSession>();
@@ -47,7 +54,7 @@ loadSessions();
 function getOrCreate(jid: string): ChatSession {
   let session = sessions.get(jid);
   if (!session) {
-    session = { mutex: Promise.resolve() };
+    session = { mutex: Promise.resolve(), usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 } };
     sessions.set(jid, session);
   }
   return session;
@@ -69,6 +76,17 @@ export function resetSession(jid: string): void {
 
 export function activeSessionCount(): number {
   return sessions.size;
+}
+
+export function addUsage(jid: string, input: number, output: number, cost: number): void {
+  const session = getOrCreate(jid);
+  session.usage.inputTokens += input;
+  session.usage.outputTokens += output;
+  session.usage.costUsd += cost;
+}
+
+export function getUsage(jid: string): SessionUsage {
+  return getOrCreate(jid).usage;
 }
 
 /**

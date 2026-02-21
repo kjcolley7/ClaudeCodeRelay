@@ -29,8 +29,6 @@ export async function initiateAuth(
   selfJid: string
 ): Promise<void> {
   try {
-    await sendText(sock, selfJid, "Claude Code is not authenticated. Starting login...");
-
     const { oauthUrl } = await startAuthLogin();
     awaitingAuth = true;
 
@@ -52,27 +50,15 @@ export async function handleAuthCode(
   selfJid: string
 ): Promise<void> {
   try {
-    await sendText(sock, selfJid, "Submitting authentication code...");
-
     const result = await submitAuthCode(code.trim());
     awaitingAuth = false;
 
     if (result.loginExitCode === 0) {
-      const account = result.status?.email ?? result.status?.account ?? "unknown";
-      const plan = result.status?.subscriptionType ?? result.status?.plan ?? "unknown";
-      if (result.status?.authenticated || result.status?.loggedIn) {
-        await sendText(
-          sock,
-          selfJid,
-          `Authenticated successfully!\n\nAccount: ${account}\nPlan: ${plan}\n\nYou can now send messages to Claude.`
-        );
-      } else {
-        await sendText(
-          sock,
-          selfJid,
-          `Authentication tokens saved. You can now send messages to Claude.`
-        );
-      }
+      await sendText(
+        sock,
+        selfJid,
+        `Authenticated successfully! You can now send messages to Claude.`
+      );
     } else {
       await sendText(
         sock,
