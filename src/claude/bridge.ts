@@ -277,17 +277,28 @@ const server = http.createServer((req, res) => {
             stdio: ["ignore", "pipe", "pipe"],
           });
           let stdout = "";
+          let stderr = "";
           statusProc.stdout.on("data", (chunk: Buffer) => {
             stdout += chunk.toString();
           });
-          statusProc.on("close", () => {
+          statusProc.stderr.on("data", (chunk: Buffer) => {
+            stderr += chunk.toString();
+          });
+          statusProc.on("close", (code) => {
+            logger.info(
+              { code, stdout: stdout.slice(0, 500), stderr: stderr.slice(0, 500) },
+              "Auth status check after token save"
+            );
             try {
               resolve(JSON.parse(stdout));
             } catch {
               resolve(null);
             }
           });
-          statusProc.on("error", () => resolve(null));
+          statusProc.on("error", (err) => {
+            logger.error({ err }, "Failed to spawn auth status check");
+            resolve(null);
+          });
         });
 
         jsonResponse(res, 200, { loginExitCode: 0, status });

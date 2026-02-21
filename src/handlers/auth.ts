@@ -66,20 +66,28 @@ export async function handleAuthCode(
     const result = await submitAuthCode(code.trim());
     awaitingAuth = false;
 
-    if (result.status?.authenticated) {
+    if (result.loginExitCode === 0) {
       authenticated = true;
-      const account = result.status.account ?? "unknown";
-      const plan = result.status.plan ?? "unknown";
-      await sendText(
-        sock,
-        selfJid,
-        `Authenticated successfully!\n\nAccount: ${account}\nPlan: ${plan}\n\nYou can now send messages to Claude.`
-      );
+      const account = result.status?.account ?? "unknown";
+      const plan = result.status?.plan ?? "unknown";
+      if (result.status?.authenticated) {
+        await sendText(
+          sock,
+          selfJid,
+          `Authenticated successfully!\n\nAccount: ${account}\nPlan: ${plan}\n\nYou can now send messages to Claude.`
+        );
+      } else {
+        await sendText(
+          sock,
+          selfJid,
+          `Authentication tokens saved. You can now send messages to Claude.`
+        );
+      }
     } else {
       await sendText(
         sock,
         selfJid,
-        `Authentication completed (exit code ${result.loginExitCode}) but status could not be verified. Try sending a message to see if it works, or use /login to retry.`
+        `Authentication failed (exit code ${result.loginExitCode}). Use /login to try again.`
       );
     }
   } catch (err) {
