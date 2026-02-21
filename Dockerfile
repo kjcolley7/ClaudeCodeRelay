@@ -36,8 +36,10 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY --from=build /app/dist dist/
+COPY docker/claude-entrypoint.sh /usr/local/bin/claude-entrypoint.sh
 
 USER claude
+ENTRYPOINT ["claude-entrypoint.sh"]
 
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
   CMD curl -f http://localhost:3100/health || exit 1

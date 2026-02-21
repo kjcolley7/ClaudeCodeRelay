@@ -29,6 +29,7 @@ async function runClaudeLocal(
     const args = [
       "-p",
       prompt,
+      "--verbose",
       "--output-format",
       "stream-json",
       "--dangerously-skip-permissions",

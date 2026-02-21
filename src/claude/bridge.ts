@@ -34,6 +34,7 @@ const server = http.createServer((req, res) => {
       const args = [
         "-p",
         payload.prompt,
+        "--verbose",
         "--output-format",
         "stream-json",
         "--dangerously-skip-permissions",
@@ -51,6 +52,7 @@ const server = http.createServer((req, res) => {
 
       const proc = spawn("claude", args, {
         cwd: config.workingDirectory,
+        stdio: ["ignore", "pipe", "pipe"],
       });
 
       res.writeHead(200, {
@@ -66,12 +68,16 @@ const server = http.createServer((req, res) => {
       }, timeout * 1000);
 
       proc.stdout.on("data", (chunk: Buffer) => {
+        const text = chunk.toString();
+        logger.debug({ bytes: chunk.length }, "Bridge: Claude stdout");
         res.write(chunk);
       });
 
       let stderr = "";
-      proc.stderr?.on("data", (chunk: Buffer) => {
-        stderr += chunk.toString();
+      proc.stderr.on("data", (chunk: Buffer) => {
+        const text = chunk.toString();
+        stderr += text;
+        logger.warn({ text: text.slice(0, 500) }, "Bridge: Claude stderr");
       });
 
       proc.on("close", (code, signal) => {
@@ -81,6 +87,8 @@ const server = http.createServer((req, res) => {
             { code, signal, stderr: stderr.slice(0, 500) },
             "Bridge: Claude exited with error"
           );
+        } else {
+          logger.info("Bridge: Claude finished successfully");
         }
         res.end();
       });
