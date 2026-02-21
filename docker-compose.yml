@@ -5,7 +5,7 @@ services:
       target: relay
     environment:
       CLAUDE_SERVICE_URL: http://claude:3100
-      BAILEYS_LOG_LEVEL: "${BAILEYS_LOG_LEVEL:-warn}"
+      BAILEYS_LOG_LEVEL: "${BAILEYS_LOG_LEVEL:-error}"
     volumes:
       - auth_info:/app/auth_info
     stdin_open: true

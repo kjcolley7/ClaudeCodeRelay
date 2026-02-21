@@ -6,6 +6,9 @@ import { logger } from "../utils/logger.js";
 // Module-level state for the running auth login process
 let authProc: ChildProcess | null = null;
 let authTimer: ReturnType<typeof setTimeout> | null = null;
+let authOutput = "";
+// Resolve function for the code submission waiting on process exit
+let authCodeResolve: ((code: number | null) => void) | null = null;
 
 function cleanupAuthProc(): void {
   if (authTimer) {
@@ -16,6 +19,7 @@ function cleanupAuthProc(): void {
     authProc.kill("SIGTERM");
   }
   authProc = null;
+  authCodeResolve = null;
 }
 
 function readBody(req: http.IncomingMessage): Promise<string> {
@@ -88,12 +92,13 @@ const server = http.createServer((req, res) => {
 
     logger.info("Starting claude auth login");
 
+    authOutput = "";
     authProc = spawn("claude", ["auth", "login"], {
       stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env, BROWSER: "echo" },
     });
 
     let oauthUrl = "";
-    let output = "";
     let responded = false;
 
     const sendUrl = () => {
@@ -104,7 +109,7 @@ const server = http.createServer((req, res) => {
 
     // 5-minute timeout for the auth process
     authTimer = setTimeout(() => {
-      logger.warn("Auth login process timed out");
+      logger.warn({ output: authOutput.slice(0, 1000) }, "Auth login process timed out");
       cleanupAuthProc();
       if (!responded) {
         responded = true;
@@ -114,9 +119,10 @@ const server = http.createServer((req, res) => {
 
     const handleOutput = (chunk: Buffer) => {
       const text = chunk.toString();
-      output += text;
+      authOutput += text;
+      logger.info({ chunk: text.slice(0, 500) }, "Auth process output");
       // Look for URL in output
-      const urlMatch = output.match(/(https?:\/\/[^\s]+)/);
+      const urlMatch = authOutput.match(/(https?:\/\/[^\s]+)/);
       if (urlMatch && !oauthUrl) {
         oauthUrl = urlMatch[1];
         logger.info({ oauthUrl }, "Captured OAuth URL");
@@ -137,17 +143,22 @@ const server = http.createServer((req, res) => {
     });
 
     authProc.on("close", (code) => {
-      logger.info({ code }, "Auth login process exited");
+      logger.info({ code, output: authOutput.slice(0, 1000) }, "Auth login process exited");
       if (authTimer) {
         clearTimeout(authTimer);
         authTimer = null;
       }
       authProc = null;
+      // If /auth/code is waiting, resolve it
+      if (authCodeResolve) {
+        authCodeResolve(code);
+        authCodeResolve = null;
+      }
       if (!responded) {
         responded = true;
         jsonResponse(res, 500, {
           error: "Auth process exited before providing URL",
-          output: output.slice(0, 1000),
+          output: authOutput.slice(0, 1000),
         });
       }
     });
@@ -155,7 +166,7 @@ const server = http.createServer((req, res) => {
   }
 
   if (req.method === "POST" && req.url === "/auth/code") {
-    readBody(req).then((body) => {
+    readBody(req).then(async (body) => {
       let payload: { code: string };
       try {
         payload = JSON.parse(body);
@@ -182,7 +193,10 @@ const server = http.createServer((req, res) => {
         authTimer = null;
       }
       authTimer = setTimeout(() => {
-        logger.warn("Auth code processing timed out");
+        logger.warn(
+          { output: authOutput.slice(0, 1000) },
+          "Auth code processing timed out"
+        );
         cleanupAuthProc();
       }, 2 * 60 * 1000);
 
@@ -190,47 +204,48 @@ const server = http.createServer((req, res) => {
       authProc.stdin.write(payload.code + "\n");
       authProc.stdin.end();
 
-      // Wait for the auth process to exit
-      authProc.on("close", (code) => {
-        if (authTimer) {
-          clearTimeout(authTimer);
-          authTimer = null;
-        }
-        authProc = null;
-
-        logger.info({ code }, "Auth login process completed after code submission");
-
-        // Check auth status
-        const statusProc = spawn("claude", ["auth", "status", "--json"], {
-          stdio: ["ignore", "pipe", "pipe"],
-        });
-
-        let stdout = "";
-        statusProc.stdout.on("data", (chunk: Buffer) => {
-          stdout += chunk.toString();
-        });
-
-        statusProc.on("close", () => {
-          try {
-            const parsed = JSON.parse(stdout);
-            jsonResponse(res, 200, { loginExitCode: code, status: parsed });
-          } catch {
-            jsonResponse(res, 200, {
-              loginExitCode: code,
-              status: null,
-              statusRaw: stdout.slice(0, 500),
-            });
-          }
-        });
-
-        statusProc.on("error", (err) => {
-          jsonResponse(res, 200, {
-            loginExitCode: code,
-            status: null,
-            error: err.message,
-          });
-        });
+      // Wait for the auth process to exit via promise
+      const exitCode = await new Promise<number | null>((resolve) => {
+        authCodeResolve = resolve;
       });
+
+      logger.info(
+        { exitCode, output: authOutput.slice(0, 1000) },
+        "Auth login process completed after code submission"
+      );
+
+      // Check auth status
+      try {
+        const statusCode = await new Promise<unknown>((resolve, reject) => {
+          const statusProc = spawn("claude", ["auth", "status", "--json"], {
+            stdio: ["ignore", "pipe", "pipe"],
+          });
+
+          let stdout = "";
+          statusProc.stdout.on("data", (chunk: Buffer) => {
+            stdout += chunk.toString();
+          });
+
+          statusProc.on("close", () => {
+            try {
+              resolve(JSON.parse(stdout));
+            } catch {
+              resolve(null);
+            }
+          });
+
+          statusProc.on("error", (err) => reject(err));
+        });
+
+        jsonResponse(res, 200, { loginExitCode: exitCode, status: statusCode });
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : "Unknown error";
+        jsonResponse(res, 200, {
+          loginExitCode: exitCode,
+          status: null,
+          error: errMsg,
+        });
+      }
     });
     return;
   }

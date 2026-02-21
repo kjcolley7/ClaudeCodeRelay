@@ -1,3 +1,4 @@
+import "../utils/suppress-logs.js";
 import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
@@ -14,15 +15,6 @@ import { logger } from "../utils/logger.js";
 // Create a Baileys logger that writes directly to stderr (synchronous, no buffering)
 const baileysLogLevel = process.env.BAILEYS_LOG_LEVEL ?? "error";
 const waLogger = pino({ level: baileysLogLevel }, pino.destination(2));
-
-// Baileys' signal protocol code uses raw console.log to dump session data, which is
-// extremely verbose. Redirect console.log through our structured logger at debug level.
-const origConsoleLog = console.log.bind(console);
-console.log = (...args: unknown[]) => {
-  const first = typeof args[0] === "string" ? args[0] : "";
-  if (first.startsWith("Closing session")) return;
-  origConsoleLog(...args);
-};
 
 export type MessageHandler = (
   jid: string,

@@ -28,7 +28,7 @@ export async function handleMessage(
   sock: WASocket,
   msg: WAMessage
 ): Promise<void> {
-  logger.info({ jid, textLen: text.length }, "Received message");
+  logger.info({ jid, text: text.slice(0, 200) }, "Received message");
 
   // Handle /login command
   if (text.trim().toLowerCase() === "/login") {
