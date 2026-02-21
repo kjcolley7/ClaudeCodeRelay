@@ -2,6 +2,10 @@
 
 Chat with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) through WhatsApp. Designed for situations where you have text-only connectivity (like airplane wifi with free messaging) but still want access to Claude Code.
 
+<p align="center">
+  <img src="assets/example.jpg" alt="Example: asking Claude Code to clone, build, and run a GitHub project — all through WhatsApp" width="400">
+</p>
+
 ## How It Works
 
 ClaudeCodeRelay runs two Docker containers on a server with internet access:
