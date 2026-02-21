@@ -3,7 +3,6 @@ services:
     build:
       context: .
       target: relay
-    env_file: .env
     environment:
       CLAUDE_SERVICE_URL: http://claude:3100
       BAILEYS_LOG_LEVEL: "${BAILEYS_LOG_LEVEL:-warn}"
@@ -21,7 +20,6 @@ services:
     build:
       context: .
       target: claude
-    env_file: .env
     environment:
       CLAUDE_TIMEOUT: "${CLAUDE_TIMEOUT:-300}"
       BRIDGE_PORT: "3100"

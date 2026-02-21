@@ -18,23 +18,13 @@ Phone (airplane wifi) → WhatsApp → WhatsApp Servers →
    npm install
    ```
 
-2. Copy `.env.example` to `.env` and configure:
-   ```bash
-   cp .env.example .env
-   ```
-
-   | Variable | Description | Default |
-   |----------|-------------|---------|
-   | `MAX_MESSAGE_LENGTH` | Max chars per WhatsApp message before splitting | `4000` |
-   | `CLAUDE_TIMEOUT` | Seconds before killing a Claude process | `300` |
-
-3. Start the relay:
+2. Start the relay:
    ```bash
    npm run dev    # development (tsx watch)
    npm run build && npm start  # production
    ```
 
-4. Scan the QR code displayed in the terminal with WhatsApp on your phone (Linked Devices).
+3. Scan the QR code displayed in the terminal with WhatsApp on your phone (Linked Devices).
 
 ## Usage
 
@@ -63,22 +53,17 @@ A two-container setup is available via Docker Compose:
 
 ### Quick start
 
-1. Copy `.env.example` to `.env`:
-   ```bash
-   cp .env.example .env
-   ```
-
-2. Build the containers:
+1. Build the containers:
    ```bash
    docker compose build
    ```
 
-3. Authenticate Claude Code (one-time):
+2. Authenticate Claude Code (one-time):
    ```bash
    docker compose run claude claude auth login
    ```
 
-4. Start the relay:
+3. Start the relay:
    ```bash
    docker compose run relay
    ```

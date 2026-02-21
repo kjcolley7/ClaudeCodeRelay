@@ -1,7 +1,3 @@
-import dotenv from "dotenv";
-
-dotenv.config();
-
 export const config = {
   workingDirectory: "/home/claude",
   maxMessageLength: parseInt(process.env.MAX_MESSAGE_LENGTH ?? "4000", 10),
