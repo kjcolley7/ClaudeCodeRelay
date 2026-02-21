@@ -91,6 +91,44 @@ function httpsPost(
   });
 }
 
+function httpsGet(
+  url: string,
+  headers: Record<string, string> = {}
+): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const req = https.request(
+      {
+        hostname: parsed.hostname,
+        port: parsed.port || 443,
+        path: parsed.pathname + parsed.search,
+        method: "GET",
+        headers,
+      },
+      (res) => {
+        let data = "";
+        res.on("data", (chunk: Buffer) => {
+          data += chunk.toString();
+        });
+        res.on("end", () => {
+          resolve({ status: res.statusCode ?? 0, body: data });
+        });
+      }
+    );
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+const OAUTH_PROFILE_URL = "https://platform.claude.com/api/oauth/profile";
+
+const ORG_TYPE_TO_PLAN: Record<string, string> = {
+  claude_max: "max",
+  claude_pro: "pro",
+  claude_enterprise: "enterprise",
+  claude_team: "team",
+};
+
 // --- Helper functions ---
 
 function readBody(req: http.IncomingMessage): Promise<string> {
@@ -243,10 +281,24 @@ const server = http.createServer((req, res) => {
 
         const tokens = JSON.parse(tokenRes.body);
 
-        logger.info(
-          { keys: Object.keys(tokens), account: tokens.account, organization: tokens.organization },
-          "Token exchange response details"
-        );
+        // Fetch profile to get subscription info
+        let subscriptionType: string | null = null;
+        let rateLimitTier: string | null = null;
+        try {
+          const profileRes = await httpsGet(OAUTH_PROFILE_URL, {
+            Authorization: `Bearer ${tokens.access_token}`,
+            "Content-Type": "application/json",
+          });
+          if (profileRes.status === 200) {
+            const profile = JSON.parse(profileRes.body);
+            const orgType = profile.organization?.organization_type;
+            subscriptionType = ORG_TYPE_TO_PLAN[orgType] ?? orgType ?? null;
+            rateLimitTier = profile.organization?.rate_limit_tier ?? null;
+            logger.info({ subscriptionType, rateLimitTier }, "Fetched profile info");
+          }
+        } catch (profileErr) {
+          logger.warn({ err: profileErr }, "Failed to fetch profile info");
+        }
 
         // Save tokens to ~/.claude/.credentials.json
         const credPath = getCredentialsPath();
@@ -264,22 +316,13 @@ const server = http.createServer((req, res) => {
           }
         }
 
-        // Extract subscription info from nested account/organization objects
-        const acct = tokens.account ?? {};
-        const org = tokens.organization ?? {};
         creds.claudeAiOauth = {
           accessToken: tokens.access_token,
           refreshToken: tokens.refresh_token,
           expiresAt: Date.now() + (tokens.expires_in ?? 3600) * 1000,
           scopes: tokens.scope ? tokens.scope.split(" ") : [],
-          subscriptionType:
-            acct.subscription_type ?? acct.subscriptionType ??
-            org.subscription_type ?? org.subscriptionType ??
-            tokens.subscription_type ?? null,
-          rateLimitTier:
-            acct.rate_limit_tier ?? acct.rateLimitTier ??
-            org.rate_limit_tier ?? org.rateLimitTier ??
-            tokens.rate_limit_tier ?? null,
+          subscriptionType,
+          rateLimitTier,
         };
 
         fs.writeFileSync(credPath, JSON.stringify(creds), "utf8");
