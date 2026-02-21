@@ -47,7 +47,7 @@ const server = http.createServer((req, res) => {
 
       logger.info(
         { sessionId: payload.sessionId, promptLen: payload.prompt.length },
-        "Bridge: spawning Claude"
+        "Spawning Claude"
       );
 
       const proc = spawn("claude", args, {
@@ -64,21 +64,18 @@ const server = http.createServer((req, res) => {
 
       const timer = setTimeout(() => {
         proc.kill("SIGTERM");
-        logger.warn({ timeout }, "Bridge: Claude process timed out");
+        logger.warn({ timeout }, "Claude process timed out");
       }, timeout * 1000);
 
       let stdoutBytes = 0;
       proc.stdout.on("data", (chunk: Buffer) => {
         stdoutBytes += chunk.length;
-        logger.info({ bytes: chunk.length, text: chunk.toString().slice(0, 500) }, "Bridge: Claude stdout");
         res.write(chunk);
       });
 
       let stderr = "";
       proc.stderr.on("data", (chunk: Buffer) => {
-        const text = chunk.toString();
-        stderr += text;
-        logger.warn({ text: text.slice(0, 500) }, "Bridge: Claude stderr");
+        stderr += chunk.toString();
       });
 
       proc.on("close", (code, signal) => {
@@ -86,17 +83,17 @@ const server = http.createServer((req, res) => {
         if (code !== 0) {
           logger.error(
             { code, signal, stderr: stderr.slice(0, 500), stdoutBytes },
-            "Bridge: Claude exited with error"
+            "Claude exited with error"
           );
         } else {
-          logger.info({ stdoutBytes }, "Bridge: Claude finished successfully");
+          logger.info({ stdoutBytes }, "Claude finished");
         }
         res.end();
       });
 
       proc.on("error", (err) => {
         clearTimeout(timer);
-        logger.error({ err }, "Bridge: failed to spawn Claude");
+        logger.error({ err }, "Failed to spawn Claude");
         res.end();
       });
 

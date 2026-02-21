@@ -111,10 +111,7 @@ async function runClaudeRemote(
 ): Promise<ClaudeResult> {
   const url = new URL("/invoke", config.claudeServiceUrl);
 
-  logger.info(
-    { sessionId, promptLen: prompt.length, url: url.href },
-    "Invoking Claude (remote)"
-  );
+  logger.info({ sessionId, promptLen: prompt.length }, "Invoking Claude (remote)");
 
   const payload = JSON.stringify({
     prompt,

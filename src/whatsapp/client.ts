@@ -86,29 +86,20 @@ function updateLidMapping(): void {
 
     if (phone && lid) {
       lidToPhone.set(lid, phone);
-      dbg(`LID mapping: ${lid} → ${phone}`);
+      logger.info({ lid, phone }, "LID mapping updated");
     }
   }
 }
 
-function dbg(msg: string): void {
-  process.stderr.write(`[DEBUG ${new Date().toISOString()}] ${msg}\n`);
-}
-
 export async function startWhatsApp(): Promise<WASocket> {
-  dbg("startWhatsApp() called");
   const { state, saveCreds } = await useMultiFileAuthState(config.authDir);
   currentCreds = state.creds;
-
-  dbg(`Auth state loaded, has creds.me: ${!!state.creds.me}`);
   updateLidMapping();
 
   sock = makeWASocket({
     logger: waLogger,
     auth: state,
   });
-
-  dbg("WASocket created, registering event handlers");
 
   sock.ev.on("creds.update", () => {
     saveCreds();
@@ -121,8 +112,6 @@ export async function startWhatsApp(): Promise<WASocket> {
     if (qr) {
       logger.info("Scan this QR code with WhatsApp:");
       qrcode.generate(qr, { small: true });
-    } else {
-      dbg(`connection.update: ${JSON.stringify(update, null, 2)}`);
     }
 
     if (connection === "close") {
@@ -141,25 +130,19 @@ export async function startWhatsApp(): Promise<WASocket> {
   });
 
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
-    dbg(`messages.upsert: type=${type}, count=${messages.length}`);
-
     if (type !== "notify") return;
 
     for (const msg of messages) {
       const jid = msg.key.remoteJid;
-      dbg(`Message: jid=${jid}, fromMe=${msg.key.fromMe}, id=${msg.key.id}, hasMessage=${!!msg.message}, keys=${msg.message ? Object.keys(msg.message).join(",") : "none"}`);
-
       if (!msg.message) continue;
       if (!jid) continue;
 
       // Skip messages sent by the relay (prevents echo loops in self-chats)
       if (msg.key.id && sentMessageIds.has(msg.key.id)) {
-        dbg(`Skipping relay-sent message ${msg.key.id}`);
         continue;
       }
 
       const text = extractText(msg.message);
-      dbg(`Extracted text: ${text ? `"${text.slice(0, 100)}"` : "null"}`);
       if (!text) continue;
 
       if (messageHandler) {
