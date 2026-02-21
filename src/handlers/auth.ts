@@ -60,7 +60,7 @@ export async function handleAuthCode(
     if (result.loginExitCode === 0) {
       const account = result.status?.account ?? "unknown";
       const plan = result.status?.plan ?? "unknown";
-      if (result.status?.authenticated) {
+      if (result.status?.authenticated || result.status?.loggedIn) {
         await sendText(
           sock,
           selfJid,

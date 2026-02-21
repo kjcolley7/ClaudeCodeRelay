@@ -96,7 +96,12 @@ function authRequestRemote(
 }
 
 export async function checkAuthStatus(): Promise<AuthStatus> {
-  const result = (await authRequest("GET", "/auth/status")) as AuthStatus;
+  const raw = (await authRequest("GET", "/auth/status")) as Record<string, unknown>;
+  // claude auth status --json returns "loggedIn", normalize to "authenticated"
+  const result: AuthStatus = {
+    ...raw,
+    authenticated: !!(raw.authenticated ?? raw.loggedIn),
+  };
   logger.info({ authenticated: result.authenticated }, "Auth status checked");
   return result;
 }
@@ -160,6 +165,7 @@ async function runClaudeLocal(
 
     let resultText = "";
     let resultSessionId = sessionId ?? "";
+    let errorMessage = "";
     let settled = false;
 
     const timer = setTimeout(() => {
@@ -181,6 +187,12 @@ async function runClaudeLocal(
         if (event.type === "result") {
           resultText = event.result ?? "";
           resultSessionId = event.session_id ?? resultSessionId;
+          if (event.is_error) {
+            errorMessage = resultText;
+          }
+        } else if (event.type === "error") {
+          errorMessage = event.error?.message ?? JSON.stringify(event);
+          logger.error({ event }, "Claude stream error event");
         }
       } catch {
         // Non-JSON line, ignore
@@ -198,8 +210,12 @@ async function runClaudeLocal(
       settled = true;
 
       if (code !== 0 && !resultText) {
-        logger.error({ code, stderr: stderr.slice(0, 500) }, "Claude exited with error");
-        reject(new Error(`Claude exited with code ${code}: ${stderr.slice(0, 500)}`));
+        const detail = errorMessage || stderr.slice(0, 500) || "Unknown error";
+        logger.error({ code, errorMessage, stderr: stderr.slice(0, 500) }, "Claude exited with error");
+        reject(new Error(`Claude error: ${detail}`));
+      } else if (errorMessage) {
+        logger.error({ errorMessage }, "Claude returned an error result");
+        reject(new Error(`Claude error: ${errorMessage}`));
       } else {
         logger.info(
           { sessionId: resultSessionId, resultLen: resultText.length },
@@ -257,6 +273,7 @@ async function runClaudeRemote(
 
         let resultText = "";
         let resultSessionId = sessionId ?? "";
+        let errorMessage = "";
 
         const rl = createInterface({ input: res });
 
@@ -269,6 +286,12 @@ async function runClaudeRemote(
             if (event.type === "result") {
               resultText = event.result ?? "";
               resultSessionId = event.session_id ?? resultSessionId;
+              if (event.is_error) {
+                errorMessage = resultText;
+              }
+            } else if (event.type === "error") {
+              errorMessage = event.error?.message ?? JSON.stringify(event);
+              logger.error({ event }, "Claude stream error event");
             }
           } catch {
             // Non-JSON line, ignore
@@ -276,11 +299,16 @@ async function runClaudeRemote(
         });
 
         res.on("end", () => {
-          logger.info(
-            { sessionId: resultSessionId, resultLen: resultText.length },
-            "Claude finished (remote)"
-          );
-          resolve({ text: resultText, sessionId: resultSessionId });
+          if (errorMessage) {
+            logger.error({ errorMessage }, "Claude returned an error result (remote)");
+            reject(new Error(`Claude error: ${errorMessage}`));
+          } else {
+            logger.info(
+              { sessionId: resultSessionId, resultLen: resultText.length },
+              "Claude finished (remote)"
+            );
+            resolve({ text: resultText, sessionId: resultSessionId });
+          }
         });
       }
     );
