@@ -244,8 +244,8 @@ const server = http.createServer((req, res) => {
         const tokens = JSON.parse(tokenRes.body);
 
         logger.info(
-          { keys: Object.keys(tokens) },
-          "Token exchange response keys"
+          { keys: Object.keys(tokens), account: tokens.account, organization: tokens.organization },
+          "Token exchange response details"
         );
 
         // Save tokens to ~/.claude/.credentials.json
@@ -264,13 +264,22 @@ const server = http.createServer((req, res) => {
           }
         }
 
+        // Extract subscription info from nested account/organization objects
+        const acct = tokens.account ?? {};
+        const org = tokens.organization ?? {};
         creds.claudeAiOauth = {
           accessToken: tokens.access_token,
           refreshToken: tokens.refresh_token,
           expiresAt: Date.now() + (tokens.expires_in ?? 3600) * 1000,
           scopes: tokens.scope ? tokens.scope.split(" ") : [],
-          subscriptionType: tokens.subscription_type ?? null,
-          rateLimitTier: tokens.rate_limit_tier ?? null,
+          subscriptionType:
+            acct.subscription_type ?? acct.subscriptionType ??
+            org.subscription_type ?? org.subscriptionType ??
+            tokens.subscription_type ?? null,
+          rateLimitTier:
+            acct.rate_limit_tier ?? acct.rateLimitTier ??
+            org.rate_limit_tier ?? org.rateLimitTier ??
+            tokens.rate_limit_tier ?? null,
         };
 
         fs.writeFileSync(credPath, JSON.stringify(creds), "utf8");
