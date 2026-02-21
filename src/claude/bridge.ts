@@ -74,11 +74,11 @@ const server = http.createServer((req, res) => {
         stderr += chunk.toString();
       });
 
-      proc.on("close", (code) => {
+      proc.on("close", (code, signal) => {
         clearTimeout(timer);
         if (code !== 0) {
           logger.error(
-            { code, stderr: stderr.slice(0, 500) },
+            { code, signal, stderr: stderr.slice(0, 500) },
             "Bridge: Claude exited with error"
           );
         }

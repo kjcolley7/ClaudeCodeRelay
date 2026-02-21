@@ -21,12 +21,13 @@ services:
     build:
       context: .
       target: claude
+    env_file: .env
     environment:
       CLAUDE_TIMEOUT: "${CLAUDE_TIMEOUT:-300}"
       BRIDGE_PORT: "3100"
     volumes:
       - ./:/workspace
-      - claude_home:/root/.claude
+      - claude_home:/home/claude/.claude
     networks:
       - relay-net
 

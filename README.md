@@ -76,7 +76,7 @@ A two-container setup is available via Docker Compose:
 
 3. Authenticate Claude Code (one-time):
    ```bash
-   docker compose run claude claude login
+   docker compose run claude claude auth login
    ```
 
 4. Start the relay:
