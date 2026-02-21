@@ -67,9 +67,10 @@ const server = http.createServer((req, res) => {
         logger.warn({ timeout }, "Bridge: Claude process timed out");
       }, timeout * 1000);
 
+      let stdoutBytes = 0;
       proc.stdout.on("data", (chunk: Buffer) => {
-        const text = chunk.toString();
-        logger.debug({ bytes: chunk.length }, "Bridge: Claude stdout");
+        stdoutBytes += chunk.length;
+        logger.info({ bytes: chunk.length, text: chunk.toString().slice(0, 500) }, "Bridge: Claude stdout");
         res.write(chunk);
       });
 
@@ -84,11 +85,11 @@ const server = http.createServer((req, res) => {
         clearTimeout(timer);
         if (code !== 0) {
           logger.error(
-            { code, signal, stderr: stderr.slice(0, 500) },
+            { code, signal, stderr: stderr.slice(0, 500), stdoutBytes },
             "Bridge: Claude exited with error"
           );
         } else {
-          logger.info("Bridge: Claude finished successfully");
+          logger.info({ stdoutBytes }, "Bridge: Claude finished successfully");
         }
         res.end();
       });
