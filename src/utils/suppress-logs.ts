@@ -1,8 +1,13 @@
-// Must be imported BEFORE @whiskeysockets/baileys to intercept console.log
-// references captured at import time. Baileys' signal protocol code uses raw
-// console.log to dump full session objects (~40 lines of noise).
-const _origLog = console.log;
-console.log = function (...args: unknown[]) {
+// Must be imported BEFORE @whiskeysockets/baileys to intercept console
+// references captured at import time. libsignal uses console.info and
+// console.warn to dump full session objects (~40 lines of noise).
+const _origInfo = console.info;
+console.info = function (...args: unknown[]) {
   if (typeof args[0] === "string" && args[0].startsWith("Closing session")) return;
-  _origLog.apply(console, args);
+  _origInfo.apply(console, args);
+};
+const _origWarn = console.warn;
+console.warn = function (...args: unknown[]) {
+  if (typeof args[0] === "string" && args[0].startsWith("Session already closed")) return;
+  _origWarn.apply(console, args);
 };

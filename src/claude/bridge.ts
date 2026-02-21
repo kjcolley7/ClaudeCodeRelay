@@ -1,26 +1,96 @@
 import http from "node:http";
-import { spawn, ChildProcess } from "node:child_process";
+import https from "node:https";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+import { spawn } from "node:child_process";
 import { config } from "../config.js";
 import { logger } from "../utils/logger.js";
 
-// Module-level state for the running auth login process
-let authProc: ChildProcess | null = null;
-let authTimer: ReturnType<typeof setTimeout> | null = null;
-let authOutput = "";
-// Resolve function for the code submission waiting on process exit
-let authCodeResolve: ((code: number | null) => void) | null = null;
+// --- OAuth PKCE auth state ---
 
-function cleanupAuthProc(): void {
-  if (authTimer) {
-    clearTimeout(authTimer);
-    authTimer = null;
-  }
-  if (authProc && !authProc.killed) {
-    authProc.kill("SIGTERM");
-  }
-  authProc = null;
-  authCodeResolve = null;
+const OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+const OAUTH_AUTHORIZE_URL = "https://claude.ai/oauth/authorize";
+const OAUTH_TOKEN_URL = "https://platform.claude.com/v1/oauth/token";
+const OAUTH_REDIRECT_URI = "https://platform.claude.com/oauth/code/callback";
+const OAUTH_SCOPES =
+  "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers";
+
+let pendingCodeVerifier: string | null = null;
+
+function base64url(buf: Buffer): string {
+  return buf.toString("base64url");
 }
+
+function generateCodeVerifier(): string {
+  return base64url(crypto.randomBytes(32));
+}
+
+function generateCodeChallenge(verifier: string): string {
+  return base64url(crypto.createHash("sha256").update(verifier).digest());
+}
+
+function generateState(): string {
+  return base64url(crypto.randomBytes(32));
+}
+
+function buildOAuthUrl(codeChallenge: string, state: string): string {
+  const params = new URLSearchParams({
+    code: "true",
+    client_id: OAUTH_CLIENT_ID,
+    response_type: "code",
+    redirect_uri: OAUTH_REDIRECT_URI,
+    scope: OAUTH_SCOPES,
+    code_challenge: codeChallenge,
+    code_challenge_method: "S256",
+    state,
+  });
+  return `${OAUTH_AUTHORIZE_URL}?${params}`;
+}
+
+function getCredentialsPath(): string {
+  const configDir = (
+    process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude")
+  ).normalize("NFC");
+  return path.join(configDir, ".credentials.json");
+}
+
+function httpsPost(
+  url: string,
+  body: string,
+  contentType: string
+): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const req = https.request(
+      {
+        hostname: parsed.hostname,
+        port: parsed.port || 443,
+        path: parsed.pathname + parsed.search,
+        method: "POST",
+        headers: {
+          "Content-Type": contentType,
+          "Content-Length": Buffer.byteLength(body),
+        },
+      },
+      (res) => {
+        let data = "";
+        res.on("data", (chunk: Buffer) => {
+          data += chunk.toString();
+        });
+        res.on("end", () => {
+          resolve({ status: res.statusCode ?? 0, body: data });
+        });
+      }
+    );
+    req.on("error", reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+// --- Helper functions ---
 
 function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve) => {
@@ -40,6 +110,8 @@ function jsonResponse(
   res.writeHead(status, { "Content-Type": "application/json" });
   res.end(JSON.stringify(data));
 }
+
+// --- HTTP server ---
 
 const server = http.createServer((req, res) => {
   if (req.method === "GET" && req.url === "/health") {
@@ -87,81 +159,16 @@ const server = http.createServer((req, res) => {
   }
 
   if (req.method === "POST" && req.url === "/auth/login") {
-    // Kill any existing auth process
-    cleanupAuthProc();
+    // Generate PKCE values and build OAuth URL
+    const codeVerifier = generateCodeVerifier();
+    const codeChallenge = generateCodeChallenge(codeVerifier);
+    const state = generateState();
+    const oauthUrl = buildOAuthUrl(codeChallenge, state);
 
-    logger.info("Starting claude auth login");
+    pendingCodeVerifier = codeVerifier;
 
-    authOutput = "";
-    authProc = spawn("claude", ["auth", "login"], {
-      stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, BROWSER: "echo" },
-    });
-
-    let oauthUrl = "";
-    let responded = false;
-
-    const sendUrl = () => {
-      if (responded || !oauthUrl) return;
-      responded = true;
-      jsonResponse(res, 200, { oauthUrl });
-    };
-
-    // 5-minute timeout for the auth process
-    authTimer = setTimeout(() => {
-      logger.warn({ output: authOutput.slice(0, 1000) }, "Auth login process timed out");
-      cleanupAuthProc();
-      if (!responded) {
-        responded = true;
-        jsonResponse(res, 504, { error: "Auth login timed out" });
-      }
-    }, 5 * 60 * 1000);
-
-    const handleOutput = (chunk: Buffer) => {
-      const text = chunk.toString();
-      authOutput += text;
-      logger.info({ chunk: text.slice(0, 500) }, "Auth process output");
-      // Look for URL in output
-      const urlMatch = authOutput.match(/(https?:\/\/[^\s]+)/);
-      if (urlMatch && !oauthUrl) {
-        oauthUrl = urlMatch[1];
-        logger.info({ oauthUrl }, "Captured OAuth URL");
-        sendUrl();
-      }
-    };
-
-    authProc.stdout?.on("data", handleOutput);
-    authProc.stderr?.on("data", handleOutput);
-
-    authProc.on("error", (err) => {
-      logger.error({ err }, "Auth login process error");
-      cleanupAuthProc();
-      if (!responded) {
-        responded = true;
-        jsonResponse(res, 500, { error: err.message });
-      }
-    });
-
-    authProc.on("close", (code) => {
-      logger.info({ code, output: authOutput.slice(0, 1000) }, "Auth login process exited");
-      if (authTimer) {
-        clearTimeout(authTimer);
-        authTimer = null;
-      }
-      authProc = null;
-      // If /auth/code is waiting, resolve it
-      if (authCodeResolve) {
-        authCodeResolve(code);
-        authCodeResolve = null;
-      }
-      if (!responded) {
-        responded = true;
-        jsonResponse(res, 500, {
-          error: "Auth process exited before providing URL",
-          output: authOutput.slice(0, 1000),
-        });
-      }
-    });
+    logger.info("Generated OAuth PKCE login URL");
+    jsonResponse(res, 200, { oauthUrl });
     return;
   }
 
@@ -180,52 +187,94 @@ const server = http.createServer((req, res) => {
         return;
       }
 
-      if (!authProc || authProc.killed || !authProc.stdin?.writable) {
+      if (!pendingCodeVerifier) {
         jsonResponse(res, 409, {
-          error: "No auth login process running. Call POST /auth/login first.",
+          error: "No pending login. Call POST /auth/login first.",
         });
         return;
       }
 
-      // Clear the original 5-minute timeout and give 2 minutes for code processing
-      if (authTimer) {
-        clearTimeout(authTimer);
-        authTimer = null;
-      }
-      authTimer = setTimeout(() => {
-        logger.warn(
-          { output: authOutput.slice(0, 1000) },
-          "Auth code processing timed out"
-        );
-        cleanupAuthProc();
-      }, 2 * 60 * 1000);
+      // The code from the browser is in format "AUTH_CODE#STATE"
+      const rawCode = payload.code.trim();
+      const hashIdx = rawCode.indexOf("#");
+      const authorizationCode = hashIdx >= 0 ? rawCode.slice(0, hashIdx) : rawCode;
+      const codeVerifier = pendingCodeVerifier;
+      pendingCodeVerifier = null;
 
-      logger.info("Writing auth code to login process stdin");
-      authProc.stdin.write(payload.code + "\n");
-      authProc.stdin.end();
+      logger.info("Exchanging auth code for tokens");
 
-      // Wait for the auth process to exit via promise
-      const exitCode = await new Promise<number | null>((resolve) => {
-        authCodeResolve = resolve;
-      });
-
-      logger.info(
-        { exitCode, output: authOutput.slice(0, 1000) },
-        "Auth login process completed after code submission"
-      );
-
-      // Check auth status
       try {
-        const statusCode = await new Promise<unknown>((resolve, reject) => {
+        // Exchange the authorization code for tokens
+        const tokenBody = new URLSearchParams({
+          grant_type: "authorization_code",
+          code: authorizationCode,
+          redirect_uri: OAUTH_REDIRECT_URI,
+          client_id: OAUTH_CLIENT_ID,
+          code_verifier: codeVerifier,
+        }).toString();
+
+        const tokenRes = await httpsPost(
+          OAUTH_TOKEN_URL,
+          tokenBody,
+          "application/x-www-form-urlencoded"
+        );
+
+        logger.info(
+          { status: tokenRes.status },
+          "Token exchange response"
+        );
+
+        if (tokenRes.status !== 200) {
+          logger.error(
+            { status: tokenRes.status, body: tokenRes.body.slice(0, 500) },
+            "Token exchange failed"
+          );
+          jsonResponse(res, 502, {
+            error: "Token exchange failed",
+            detail: tokenRes.body.slice(0, 500),
+          });
+          return;
+        }
+
+        const tokens = JSON.parse(tokenRes.body);
+
+        // Save tokens to ~/.claude/.credentials.json
+        const credPath = getCredentialsPath();
+        const credDir = path.dirname(credPath);
+        if (!fs.existsSync(credDir)) {
+          fs.mkdirSync(credDir, { recursive: true });
+        }
+
+        let creds: Record<string, unknown> = {};
+        if (fs.existsSync(credPath)) {
+          try {
+            creds = JSON.parse(fs.readFileSync(credPath, "utf8"));
+          } catch {
+            // Start fresh
+          }
+        }
+
+        creds.claudeAiOauth = {
+          accessToken: tokens.access_token,
+          refreshToken: tokens.refresh_token,
+          expiresAt: Date.now() + (tokens.expires_in ?? 3600) * 1000,
+          scopes: tokens.scope ? tokens.scope.split(" ") : [],
+        };
+
+        fs.writeFileSync(credPath, JSON.stringify(creds), "utf8");
+        fs.chmodSync(credPath, 0o600);
+
+        logger.info("Saved OAuth tokens to credentials file");
+
+        // Check auth status to confirm and get account info
+        const status = await new Promise<unknown>((resolve) => {
           const statusProc = spawn("claude", ["auth", "status", "--json"], {
             stdio: ["ignore", "pipe", "pipe"],
           });
-
           let stdout = "";
           statusProc.stdout.on("data", (chunk: Buffer) => {
             stdout += chunk.toString();
           });
-
           statusProc.on("close", () => {
             try {
               resolve(JSON.parse(stdout));
@@ -233,18 +282,14 @@ const server = http.createServer((req, res) => {
               resolve(null);
             }
           });
-
-          statusProc.on("error", (err) => reject(err));
+          statusProc.on("error", () => resolve(null));
         });
 
-        jsonResponse(res, 200, { loginExitCode: exitCode, status: statusCode });
+        jsonResponse(res, 200, { loginExitCode: 0, status });
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : "Unknown error";
-        jsonResponse(res, 200, {
-          loginExitCode: exitCode,
-          status: null,
-          error: errMsg,
-        });
+        logger.error({ err }, "Auth code exchange failed");
+        jsonResponse(res, 500, { error: errMsg });
       }
     });
     return;
