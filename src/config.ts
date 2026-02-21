@@ -17,10 +17,10 @@ export const config = {
       .map((n) => n.trim())
       .filter(Boolean)
   ),
-  workingDirectory: process.env.WORKING_DIRECTORY ?? ".",
+  workingDirectory: "/workspace",
   maxMessageLength: parseInt(process.env.MAX_MESSAGE_LENGTH ?? "4000", 10),
   claudeTimeout: parseInt(process.env.CLAUDE_TIMEOUT ?? "300", 10),
-  authDir: process.env.AUTH_DIR ?? "./auth_info",
+  authDir: "./auth_info",
   claudeServiceUrl: process.env.CLAUDE_SERVICE_URL ?? "",
   bridgePort: parseInt(process.env.BRIDGE_PORT ?? "3100", 10),
 };

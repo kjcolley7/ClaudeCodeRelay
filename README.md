@@ -26,10 +26,8 @@ Phone (airplane wifi) → WhatsApp → WhatsApp Servers →
    | Variable | Description | Default |
    |----------|-------------|---------|
    | `ALLOWED_NUMBERS` | Comma-separated E.164 phone numbers (without `+`) | *required* |
-   | `WORKING_DIRECTORY` | CWD for Claude Code subprocess | *required* |
    | `MAX_MESSAGE_LENGTH` | Max chars per WhatsApp message before splitting | `4000` |
    | `CLAUDE_TIMEOUT` | Seconds before killing a Claude process | `300` |
-   | `AUTH_DIR` | Directory for WhatsApp auth state | `./auth_info` |
 
 3. Start the relay:
    ```bash
