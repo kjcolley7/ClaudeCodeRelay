@@ -1,4 +1,4 @@
-import { WASocket } from "@whiskeysockets/baileys";
+import { WASocket, WAMessage } from "@whiskeysockets/baileys";
 import { logger } from "../utils/logger.js";
 import { runClaude } from "../claude/runner.js";
 import { getSessionId, setSessionId, withLock } from "../claude/session.js";
@@ -7,8 +7,13 @@ import { splitMessage } from "../utils/split.js";
 import { trackSentMessage } from "../whatsapp/client.js";
 
 /** Send a text message and track its ID so we don't process our own messages */
-async function sendText(sock: WASocket, jid: string, text: string): Promise<void> {
-  const sent = await sock.sendMessage(jid, { text });
+async function sendText(
+  sock: WASocket,
+  jid: string,
+  text: string,
+  quoted?: WAMessage
+): Promise<void> {
+  const sent = await sock.sendMessage(jid, { text }, { quoted });
   if (sent?.key.id) {
     trackSentMessage(sent.key.id);
   }
@@ -17,7 +22,8 @@ async function sendText(sock: WASocket, jid: string, text: string): Promise<void
 export async function handleMessage(
   jid: string,
   text: string,
-  sock: WASocket
+  sock: WASocket,
+  msg: WAMessage
 ): Promise<void> {
   logger.info({ jid, textLen: text.length }, "Received message");
 
@@ -25,7 +31,7 @@ export async function handleMessage(
   if (text.startsWith("/")) {
     const { handled, response } = handleCommand(jid, text);
     if (handled && response) {
-      await sendText(sock, jid, response);
+      await sendText(sock, jid, response, msg);
       return;
     }
     if (handled) return;
@@ -71,13 +77,14 @@ export async function handleMessage(
 
       // Send response (split if needed)
       if (!result.text) {
-        await sendText(sock, jid, "(Claude returned an empty response)");
+        await sendText(sock, jid, "(Claude returned an empty response)", msg);
         return;
       }
 
       const chunks = splitMessage(result.text);
-      for (const chunk of chunks) {
-        await sendText(sock, jid, chunk);
+      // Quote the original message on the first chunk only
+      for (let i = 0; i < chunks.length; i++) {
+        await sendText(sock, jid, chunks[i], i === 0 ? msg : undefined);
       }
     } catch (err) {
       clearInterval(typingInterval);
@@ -90,7 +97,7 @@ export async function handleMessage(
       logger.error({ err, jid }, "Error running Claude");
       const errMsg =
         err instanceof Error ? err.message : "Unknown error";
-      await sendText(sock, jid, `Error: ${errMsg}`);
+      await sendText(sock, jid, `Error: ${errMsg}`, msg);
     }
   });
 }

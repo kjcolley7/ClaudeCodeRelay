@@ -2,6 +2,7 @@ import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
   WASocket,
+  WAMessage,
   proto,
 } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
@@ -17,7 +18,8 @@ const waLogger = pino({ level: baileysLogLevel }, pino.destination(2));
 export type MessageHandler = (
   jid: string,
   text: string,
-  sock: WASocket
+  sock: WASocket,
+  msg: WAMessage
 ) => Promise<void>;
 
 let sock: WASocket | null = null;
@@ -98,7 +100,7 @@ export async function startWhatsApp(): Promise<WASocket> {
 
       if (messageHandler) {
         try {
-          await messageHandler(jid, text, sock!);
+          await messageHandler(jid, text, sock!, msg as WAMessage);
         } catch (err) {
           logger.error({ err, jid }, "Error in message handler");
         }
