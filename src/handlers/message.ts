@@ -5,9 +5,7 @@ import { getSessionId, setSessionId, withLock } from "../claude/session.js";
 import { handleCommand } from "./commands.js";
 import { splitMessage } from "../utils/split.js";
 import { trackSentMessage } from "../whatsapp/client.js";
-import { isAwaitingAuth, isAuthenticated, setAuthenticated, handleAuthCode, initiateAuth } from "./auth.js";
-import { checkAuthStatus } from "../claude/runner.js";
-import { config } from "../config.js";
+import { isAwaitingAuth, handleAuthCode, initiateAuth } from "./auth.js";
 
 /** Send a text message and track its ID so we don't process our own messages */
 async function sendText(
@@ -52,17 +50,6 @@ export async function handleMessage(
     if (handled) return;
   }
 
-  // If we know Claude isn't authenticated, prompt login instead of invoking
-  if (!isAuthenticated() && config.claudeServiceUrl) {
-    await sendText(
-      sock,
-      jid,
-      "Claude Code is not authenticated. Use /login to start the login flow.",
-      msg
-    );
-    return;
-  }
-
   // Queue through per-chat mutex
   await withLock(jid, async () => {
     // Show typing indicator
@@ -103,28 +90,9 @@ export async function handleMessage(
 
       // Send response (split if needed)
       if (!result.text) {
-        // Check if this might be an auth issue
-        if (config.claudeServiceUrl) {
-          try {
-            const status = await checkAuthStatus();
-            if (!status.authenticated) {
-              setAuthenticated(false);
-              await sendText(
-                sock,
-                jid,
-                "Claude Code is not authenticated. Use /login to start the login flow.",
-                msg
-              );
-              return;
-            }
-          } catch {
-            // Auth check failed, fall through to generic message
-          }
-        }
         await sendText(sock, jid, "(Claude returned an empty response)", msg);
         return;
       }
-      setAuthenticated(true);
 
       const chunks = splitMessage(result.text);
       // Quote the original message on the first chunk only

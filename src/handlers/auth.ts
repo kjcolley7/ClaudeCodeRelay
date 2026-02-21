@@ -8,18 +8,9 @@ import {
 import { trackSentMessage } from "../whatsapp/client.js";
 
 let awaitingAuth = false;
-let authenticated = false;
 
 export function isAwaitingAuth(): boolean {
   return awaitingAuth;
-}
-
-export function isAuthenticated(): boolean {
-  return authenticated;
-}
-
-export function setAuthenticated(value: boolean): void {
-  authenticated = value;
 }
 
 async function sendText(
@@ -67,7 +58,6 @@ export async function handleAuthCode(
     awaitingAuth = false;
 
     if (result.loginExitCode === 0) {
-      authenticated = true;
       const account = result.status?.account ?? "unknown";
       const plan = result.status?.plan ?? "unknown";
       if (result.status?.authenticated) {
@@ -109,11 +99,9 @@ export async function checkAndInitiateAuth(
   try {
     const status = await checkAuthStatus();
     if (!status.authenticated) {
-      authenticated = false;
       logger.info("Claude not authenticated, initiating login flow");
       await initiateAuth(sock, selfJid);
     } else {
-      authenticated = true;
       logger.info(
         { account: status.account, plan: status.plan },
         "Claude already authenticated"
