@@ -1,4 +1,4 @@
-import { WASocket, WAMessage } from "@whiskeysockets/baileys";
+import { WASocket } from "@whiskeysockets/baileys";
 import { logger } from "../utils/logger.js";
 import {
   startAuthLogin,
@@ -8,9 +8,18 @@ import {
 import { trackSentMessage } from "../whatsapp/client.js";
 
 let awaitingAuth = false;
+let authenticated = false;
 
 export function isAwaitingAuth(): boolean {
   return awaitingAuth;
+}
+
+export function isAuthenticated(): boolean {
+  return authenticated;
+}
+
+export function setAuthenticated(value: boolean): void {
+  authenticated = value;
 }
 
 async function sendText(
@@ -58,6 +67,7 @@ export async function handleAuthCode(
     awaitingAuth = false;
 
     if (result.status?.authenticated) {
+      authenticated = true;
       const account = result.status.account ?? "unknown";
       const plan = result.status.plan ?? "unknown";
       await sendText(
@@ -91,9 +101,11 @@ export async function checkAndInitiateAuth(
   try {
     const status = await checkAuthStatus();
     if (!status.authenticated) {
+      authenticated = false;
       logger.info("Claude not authenticated, initiating login flow");
       await initiateAuth(sock, selfJid);
     } else {
+      authenticated = true;
       logger.info(
         { account: status.account, plan: status.plan },
         "Claude already authenticated"

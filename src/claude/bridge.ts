@@ -176,8 +176,19 @@ const server = http.createServer((req, res) => {
         return;
       }
 
+      // Clear the original 5-minute timeout and give 2 minutes for code processing
+      if (authTimer) {
+        clearTimeout(authTimer);
+        authTimer = null;
+      }
+      authTimer = setTimeout(() => {
+        logger.warn("Auth code processing timed out");
+        cleanupAuthProc();
+      }, 2 * 60 * 1000);
+
       logger.info("Writing auth code to login process stdin");
       authProc.stdin.write(payload.code + "\n");
+      authProc.stdin.end();
 
       // Wait for the auth process to exit
       authProc.on("close", (code) => {
