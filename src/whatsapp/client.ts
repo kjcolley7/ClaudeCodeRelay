@@ -26,12 +26,6 @@ let messageHandler: MessageHandler | null = null;
 /** Track message IDs sent by the relay so we can ignore our own messages in self-chats */
 const sentMessageIds = new Set<string>();
 
-/** Map LID identifiers to phone numbers (populated from creds and lid-mapping events) */
-const lidToPhone = new Map<string, string>();
-
-/** Reference to current auth creds for LID resolution */
-let currentCreds: any = null;
-
 export function onMessage(handler: MessageHandler): void {
   messageHandler = handler;
 }
@@ -50,61 +44,15 @@ export function trackSentMessage(id: string): void {
   setTimeout(() => sentMessageIds.delete(id), 5 * 60 * 1000);
 }
 
-/**
- * Resolve a JID to a phone number for whitelist checking.
- * Handles both phone-based JIDs (@s.whatsapp.net) and LID JIDs (@lid).
- */
-export function resolveJidToNumber(jid: string): string | undefined {
-  // Phone number JID: "15551234567@s.whatsapp.net" → "15551234567"
-  if (jid.endsWith("@s.whatsapp.net")) {
-    return jid.replace(/@.*$/, "");
-  }
-
-  // LID JID: "123456789012345@lid" → look up phone number
-  if (jid.endsWith("@lid")) {
-    const lid = jid.replace(/@.*$/, "");
-    return lidToPhone.get(lid);
-  }
-
-  // Group or other JID type — return raw identifier
-  return jid.replace(/@.*$/, "");
-}
-
-function updateLidMapping(): void {
-  const me = currentCreds?.me;
-  if (!me) return;
-
-  // me.id is like "15551234567:123@s.whatsapp.net" or "15551234567@s.whatsapp.net"
-  // me.lid is like "123456789012345@lid"
-  const phoneJid = me.id;
-  const lidJid = me.lid;
-
-  if (phoneJid && lidJid) {
-    // Strip device suffix and domain: "15551234567:123@s.whatsapp.net" → "15551234567"
-    const phone = phoneJid.replace(/:.*$/, "").replace(/@.*$/, "");
-    const lid = lidJid.replace(/@.*$/, "").replace(/:.*$/, "");
-
-    if (phone && lid) {
-      lidToPhone.set(lid, phone);
-      logger.info({ lid, phone }, "LID mapping updated");
-    }
-  }
-}
-
 export async function startWhatsApp(): Promise<WASocket> {
   const { state, saveCreds } = await useMultiFileAuthState(config.authDir);
-  currentCreds = state.creds;
-  updateLidMapping();
 
   sock = makeWASocket({
     logger: waLogger,
     auth: state,
   });
 
-  sock.ev.on("creds.update", () => {
-    saveCreds();
-    updateLidMapping();
-  });
+  sock.ev.on("creds.update", saveCreds);
 
   sock.ev.on("connection.update", (update) => {
     const { connection, lastDisconnect, qr } = update;
@@ -137,7 +85,10 @@ export async function startWhatsApp(): Promise<WASocket> {
       if (!msg.message) continue;
       if (!jid) continue;
 
-      // Skip messages sent by the relay (prevents echo loops in self-chats)
+      // Only process messages from ourselves (self-chat)
+      if (!msg.key.fromMe) continue;
+
+      // Skip messages sent by the relay (prevents echo loops)
       if (msg.key.id && sentMessageIds.has(msg.key.id)) {
         continue;
       }

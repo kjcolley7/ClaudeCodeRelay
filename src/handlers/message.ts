@@ -1,11 +1,10 @@
 import { WASocket } from "@whiskeysockets/baileys";
-import { config } from "../config.js";
 import { logger } from "../utils/logger.js";
 import { runClaude } from "../claude/runner.js";
 import { getSessionId, setSessionId, withLock } from "../claude/session.js";
 import { handleCommand } from "./commands.js";
 import { splitMessage } from "../utils/split.js";
-import { trackSentMessage, resolveJidToNumber } from "../whatsapp/client.js";
+import { trackSentMessage } from "../whatsapp/client.js";
 
 /** Send a text message and track its ID so we don't process our own messages */
 async function sendText(sock: WASocket, jid: string, text: string): Promise<void> {
@@ -20,14 +19,6 @@ export async function handleMessage(
   text: string,
   sock: WASocket
 ): Promise<void> {
-  const number = resolveJidToNumber(jid);
-
-  // Whitelist check — silently ignore unauthorized senders
-  if (!number || !config.allowedNumbers.has(number)) {
-    logger.debug({ jid, number }, "Ignoring message from non-allowed number");
-    return;
-  }
-
   logger.info({ jid, textLen: text.length }, "Received message");
 
   // Check for slash commands

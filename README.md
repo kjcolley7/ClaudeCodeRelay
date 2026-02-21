@@ -25,7 +25,6 @@ Phone (airplane wifi) → WhatsApp → WhatsApp Servers →
 
    | Variable | Description | Default |
    |----------|-------------|---------|
-   | `ALLOWED_NUMBERS` | Comma-separated E.164 phone numbers (without `+`) | *required* |
    | `MAX_MESSAGE_LENGTH` | Max chars per WhatsApp message before splitting | `4000` |
    | `CLAUDE_TIMEOUT` | Seconds before killing a Claude process | `300` |
 
@@ -39,7 +38,7 @@ Phone (airplane wifi) → WhatsApp → WhatsApp Servers →
 
 ## Usage
 
-Send a message from a whitelisted number to the linked WhatsApp account. The message is forwarded to Claude Code and the response is sent back.
+Send a message to yourself (self-chat) from the linked WhatsApp account. The relay only processes messages with `fromMe=true`, so it responds to your own messages and ignores everything else.
 
 ### Commands
 
@@ -64,7 +63,7 @@ A two-container setup is available via Docker Compose:
 
 ### Quick start
 
-1. Copy `.env.example` to `.env` and set `ALLOWED_NUMBERS`:
+1. Copy `.env.example` to `.env`:
    ```bash
    cp .env.example .env
    ```
