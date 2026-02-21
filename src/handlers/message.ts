@@ -5,10 +5,14 @@ import { runClaude } from "../claude/runner.js";
 import { getSessionId, setSessionId, withLock } from "../claude/session.js";
 import { handleCommand } from "./commands.js";
 import { splitMessage } from "../utils/split.js";
+import { trackSentMessage, resolveJidToNumber } from "../whatsapp/client.js";
 
-/** Extract the phone number from a JID like "14155551234@s.whatsapp.net" */
-function jidToNumber(jid: string): string {
-  return jid.replace(/@.*$/, "");
+/** Send a text message and track its ID so we don't process our own messages */
+async function sendText(sock: WASocket, jid: string, text: string): Promise<void> {
+  const sent = await sock.sendMessage(jid, { text });
+  if (sent?.key.id) {
+    trackSentMessage(sent.key.id);
+  }
 }
 
 export async function handleMessage(
@@ -16,10 +20,10 @@ export async function handleMessage(
   text: string,
   sock: WASocket
 ): Promise<void> {
-  const number = jidToNumber(jid);
+  const number = resolveJidToNumber(jid);
 
   // Whitelist check — silently ignore unauthorized senders
-  if (!config.allowedNumbers.has(number)) {
+  if (!number || !config.allowedNumbers.has(number)) {
     logger.debug({ jid, number }, "Ignoring message from non-allowed number");
     return;
   }
@@ -30,7 +34,7 @@ export async function handleMessage(
   if (text.startsWith("/")) {
     const { handled, response } = handleCommand(jid, text);
     if (handled && response) {
-      await sock.sendMessage(jid, { text: response });
+      await sendText(sock, jid, response);
       return;
     }
     if (handled) return;
@@ -39,8 +43,12 @@ export async function handleMessage(
   // Queue through per-chat mutex
   await withLock(jid, async () => {
     // Show typing indicator
-    await sock.presenceSubscribe(jid);
-    await sock.sendPresenceUpdate("composing", jid);
+    try {
+      await sock.presenceSubscribe(jid);
+      await sock.sendPresenceUpdate("composing", jid);
+    } catch {
+      // Ignore presence errors (e.g. self-chat)
+    }
 
     // Refresh typing indicator every 8 seconds
     const typingInterval = setInterval(async () => {
@@ -64,28 +72,34 @@ export async function handleMessage(
 
       // Clear typing
       clearInterval(typingInterval);
-      await sock.sendPresenceUpdate("paused", jid);
+      try {
+        await sock.sendPresenceUpdate("paused", jid);
+      } catch {
+        // Ignore presence errors
+      }
 
       // Send response (split if needed)
       if (!result.text) {
-        await sock.sendMessage(jid, { text: "(Claude returned an empty response)" });
+        await sendText(sock, jid, "(Claude returned an empty response)");
         return;
       }
 
       const chunks = splitMessage(result.text);
       for (const chunk of chunks) {
-        await sock.sendMessage(jid, { text: chunk });
+        await sendText(sock, jid, chunk);
       }
     } catch (err) {
       clearInterval(typingInterval);
-      await sock.sendPresenceUpdate("paused", jid);
+      try {
+        await sock.sendPresenceUpdate("paused", jid);
+      } catch {
+        // Ignore presence errors
+      }
 
       logger.error({ err, jid }, "Error running Claude");
       const errMsg =
         err instanceof Error ? err.message : "Unknown error";
-      await sock.sendMessage(jid, {
-        text: `Error: ${errMsg}`,
-      });
+      await sendText(sock, jid, `Error: ${errMsg}`);
     }
   });
 }
