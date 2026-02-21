@@ -91,9 +91,9 @@ const server = http.createServer((req, res) => {
         res.end();
       });
 
-      // Kill subprocess if client disconnects
-      req.on("close", () => {
-        if (!proc.killed) {
+      // Kill subprocess if client disconnects before response finishes
+      res.on("close", () => {
+        if (!res.writableFinished && !proc.killed) {
           proc.kill("SIGTERM");
           clearTimeout(timer);
         }
