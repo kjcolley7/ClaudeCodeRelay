@@ -54,10 +54,21 @@ export async function handleAuthCode(
     awaitingAuth = false;
 
     if (result.loginExitCode === 0) {
+      // Fetch account info with a separate status check
+      let details = "";
+      try {
+        const status = await checkAuthStatus();
+        const parts: string[] = [];
+        if (status.account) parts.push(`Account: ${status.account}`);
+        if (status.plan) parts.push(`Plan: ${status.plan}`);
+        if (parts.length > 0) details = "\n\n" + parts.join("\n");
+      } catch {
+        // Non-critical, just skip details
+      }
       await sendText(
         sock,
         selfJid,
-        `Authenticated successfully! You can now send messages to Claude.`
+        `Authenticated successfully! You can now send messages to Claude.${details}`
       );
     } else {
       await sendText(

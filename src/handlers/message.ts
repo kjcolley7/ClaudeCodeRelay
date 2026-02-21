@@ -161,8 +161,6 @@ async function handleStatus(
     }
   }
 
-  lines.push(`Working dir: ${config.workingDirectory}`);
-
   // Auth status from bridge
   if (config.claudeServiceUrl) {
     try {

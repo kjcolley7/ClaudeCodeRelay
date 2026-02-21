@@ -243,6 +243,11 @@ const server = http.createServer((req, res) => {
 
         const tokens = JSON.parse(tokenRes.body);
 
+        logger.info(
+          { keys: Object.keys(tokens) },
+          "Token exchange response keys"
+        );
+
         // Save tokens to ~/.claude/.credentials.json
         const credPath = getCredentialsPath();
         const credDir = path.dirname(credPath);
@@ -264,6 +269,8 @@ const server = http.createServer((req, res) => {
           refreshToken: tokens.refresh_token,
           expiresAt: Date.now() + (tokens.expires_in ?? 3600) * 1000,
           scopes: tokens.scope ? tokens.scope.split(" ") : [],
+          subscriptionType: tokens.subscription_type ?? null,
+          rateLimitTier: tokens.rate_limit_tier ?? null,
         };
 
         fs.writeFileSync(credPath, JSON.stringify(creds), "utf8");
