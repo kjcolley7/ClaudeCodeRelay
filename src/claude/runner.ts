@@ -166,6 +166,7 @@ async function runClaudeLocal(
     let resultText = "";
     let resultSessionId = sessionId ?? "";
     let errorMessage = "";
+    const events: unknown[] = [];
     let settled = false;
 
     const timer = setTimeout(() => {
@@ -182,6 +183,7 @@ async function runClaudeLocal(
       if (!line.trim()) return;
       try {
         const event = JSON.parse(line);
+        events.push(event);
         onActivity?.();
 
         if (event.type === "result") {
@@ -192,7 +194,6 @@ async function runClaudeLocal(
           }
         } else if (event.type === "error") {
           errorMessage = event.error?.message ?? JSON.stringify(event);
-          logger.error({ event }, "Claude stream error event");
         }
       } catch {
         // Non-JSON line, ignore
@@ -209,13 +210,12 @@ async function runClaudeLocal(
       if (settled) return;
       settled = true;
 
-      if (code !== 0 && !resultText) {
-        const detail = errorMessage || stderr.slice(0, 500) || "Unknown error";
-        logger.error({ code, errorMessage, stderr: stderr.slice(0, 500) }, "Claude exited with error");
-        reject(new Error(`Claude error: ${detail}`));
-      } else if (errorMessage) {
-        logger.error({ errorMessage }, "Claude returned an error result");
+      if (errorMessage) {
+        logger.error({ code, errorMessage, events }, "Claude returned an error");
         reject(new Error(`Claude error: ${errorMessage}`));
+      } else if (code !== 0 || !resultText) {
+        logger.error({ code, events, stderr: stderr.slice(0, 500) }, "Claude exited with error");
+        reject(new Error(resultText || `Claude exited with code ${code}`));
       } else {
         logger.info(
           { sessionId: resultSessionId, resultLen: resultText.length },
@@ -274,6 +274,7 @@ async function runClaudeRemote(
         let resultText = "";
         let resultSessionId = sessionId ?? "";
         let errorMessage = "";
+        const events: unknown[] = [];
 
         const rl = createInterface({ input: res });
 
@@ -281,6 +282,7 @@ async function runClaudeRemote(
           if (!line.trim()) return;
           try {
             const event = JSON.parse(line);
+            events.push(event);
             onActivity?.();
 
             if (event.type === "result") {
@@ -291,7 +293,6 @@ async function runClaudeRemote(
               }
             } else if (event.type === "error") {
               errorMessage = event.error?.message ?? JSON.stringify(event);
-              logger.error({ event }, "Claude stream error event");
             }
           } catch {
             // Non-JSON line, ignore
@@ -300,8 +301,11 @@ async function runClaudeRemote(
 
         res.on("end", () => {
           if (errorMessage) {
-            logger.error({ errorMessage }, "Claude returned an error result (remote)");
+            logger.error({ errorMessage, events }, "Claude returned an error (remote)");
             reject(new Error(`Claude error: ${errorMessage}`));
+          } else if (!resultText) {
+            logger.error({ events }, "Claude returned empty result (remote)");
+            reject(new Error("Claude returned an empty response"));
           } else {
             logger.info(
               { sessionId: resultSessionId, resultLen: resultText.length },
