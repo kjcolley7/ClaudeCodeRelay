@@ -56,3 +56,49 @@ Send a message from a whitelisted number to the linked WhatsApp account. The mes
 - **Auto-reconnection** — Reconnects automatically on disconnect (re-scan QR if logged out)
 - **Message splitting** — Long responses split at paragraph/line/sentence boundaries with code fence repair
 - **Typing indicators** — Shows "composing" while Claude is working
+
+## Docker
+
+A two-container setup is available via Docker Compose:
+
+- **relay** — WhatsApp/Baileys relay (Node.js)
+- **claude** — HTTP bridge server that spawns the Claude Code CLI
+
+### Quick start
+
+1. Copy `.env.example` to `.env` and set `ALLOWED_NUMBERS`:
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Build the containers:
+   ```bash
+   docker compose build
+   ```
+
+3. Authenticate Claude Code (one-time):
+   ```bash
+   docker compose run claude claude login
+   ```
+
+4. Start the relay:
+   ```bash
+   docker compose run relay
+   ```
+   Scan the QR code with WhatsApp, then messages will flow through.
+
+### Architecture
+
+```
+relay container                      claude container
+┌──────────────────┐   HTTP stream   ┌─────────────────────┐
+│ WhatsApp/Baileys │───────────────►│ bridge server :3100  │
+│ runner.ts        │◄───────────────│ spawns `claude` CLI  │
+│ vol: auth_info   │   NDJSON lines  │ vol: /workspace      │
+└──────────────────┘                 └─────────────────────┘
+```
+
+- The relay container sends prompts via HTTP POST to the claude container's bridge server
+- The bridge streams back NDJSON events (same format as `claude --output-format stream-json`)
+- Claude Code credentials persist in a `claude_home` Docker volume
+- The working directory is bind-mounted at `/workspace` in the claude container

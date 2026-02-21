@@ -7,7 +7,9 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "tsx watch src/index.ts"
+    "dev": "tsx watch src/index.ts",
+    "start:bridge": "node dist/bridge-main.js",
+    "dev:bridge": "tsx watch src/bridge-main.ts"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.16",

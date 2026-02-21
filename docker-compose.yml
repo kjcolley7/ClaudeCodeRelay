@@ -1,0 +1,37 @@
+services:
+  relay:
+    build:
+      context: .
+      target: relay
+    env_file: .env
+    environment:
+      CLAUDE_SERVICE_URL: http://claude:3100
+    volumes:
+      - ./auth_info:/app/auth_info
+    stdin_open: true
+    tty: true
+    depends_on:
+      claude:
+        condition: service_healthy
+    networks:
+      - relay-net
+
+  claude:
+    build:
+      context: .
+      target: claude
+    environment:
+      WORKING_DIRECTORY: /workspace
+      CLAUDE_TIMEOUT: "${CLAUDE_TIMEOUT:-300}"
+      BRIDGE_PORT: "3100"
+    volumes:
+      - ./:/workspace
+      - claude_home:/root/.claude
+    networks:
+      - relay-net
+
+networks:
+  relay-net:
+
+volumes:
+  claude_home:
