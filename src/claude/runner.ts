@@ -108,8 +108,10 @@ export async function checkAuthStatus(): Promise<AuthStatus> {
   const result: AuthStatus = {
     ...raw,
     authenticated: !!(raw.authenticated ?? raw.loggedIn),
+    account: (raw.email ?? raw.account) as string | undefined,
+    plan: (raw.subscriptionType ?? raw.plan) as string | undefined,
   };
-  logger.info({ authenticated: result.authenticated }, "Auth status checked");
+  logger.info({ authenticated: result.authenticated, account: result.account, plan: result.plan }, "Auth status checked");
   return result;
 }
 

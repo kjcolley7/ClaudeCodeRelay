@@ -58,8 +58,8 @@ export async function handleAuthCode(
     awaitingAuth = false;
 
     if (result.loginExitCode === 0) {
-      const account = result.status?.account ?? "unknown";
-      const plan = result.status?.plan ?? "unknown";
+      const account = result.status?.email ?? result.status?.account ?? "unknown";
+      const plan = result.status?.subscriptionType ?? result.status?.plan ?? "unknown";
       if (result.status?.authenticated || result.status?.loggedIn) {
         await sendText(
           sock,
