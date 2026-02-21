@@ -17,7 +17,7 @@ export const config = {
       .map((n) => n.trim())
       .filter(Boolean)
   ),
-  workingDirectory: "/workspace",
+  workingDirectory: "/home/claude",
   maxMessageLength: parseInt(process.env.MAX_MESSAGE_LENGTH ?? "4000", 10),
   claudeTimeout: parseInt(process.env.CLAUDE_TIMEOUT ?? "300", 10),
   authDir: "./auth_info",

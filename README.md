@@ -92,11 +92,10 @@ relay container                      claude container
 ┌──────────────────┐   HTTP stream   ┌─────────────────────┐
 │ WhatsApp/Baileys │───────────────►│ bridge server :3100  │
 │ runner.ts        │◄───────────────│ spawns `claude` CLI  │
-│ vol: auth_info   │   NDJSON lines  │ vol: /workspace      │
+│ vol: auth_info   │   NDJSON lines  │ vol: /home/claude    │
 └──────────────────┘                 └─────────────────────┘
 ```
 
 - The relay container sends prompts via HTTP POST to the claude container's bridge server
 - The bridge streams back NDJSON events (same format as `claude --output-format stream-json`)
-- Claude Code credentials persist in a `claude_home` Docker volume
-- The working directory is bind-mounted at `/workspace` in the claude container
+- A single `claude_home` Docker volume is mounted at `/home/claude`, serving as both the home directory (for Claude Code credentials) and the workspace

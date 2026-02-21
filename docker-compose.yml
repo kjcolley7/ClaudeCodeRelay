@@ -26,8 +26,7 @@ services:
       CLAUDE_TIMEOUT: "${CLAUDE_TIMEOUT:-300}"
       BRIDGE_PORT: "3100"
     volumes:
-      - ./:/workspace
-      - claude_home:/home/claude/.claude
+      - claude_home:/home/claude
     networks:
       - relay-net
 
