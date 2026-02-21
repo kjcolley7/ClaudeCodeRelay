@@ -9,6 +9,13 @@ export interface ClaudeResult {
   sessionId: string;
 }
 
+export class ClaudeSessionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ClaudeSessionError";
+  }
+}
+
 // --- Auth types ---
 
 export interface AuthStatus {
@@ -190,7 +197,8 @@ async function runClaudeLocal(
           resultText = event.result ?? "";
           resultSessionId = event.session_id ?? resultSessionId;
           if (event.is_error) {
-            errorMessage = resultText;
+            const errors = Array.isArray(event.errors) ? event.errors.join("; ") : "";
+            errorMessage = errors || resultText || "Unknown error";
           }
         } else if (event.type === "error") {
           errorMessage = event.error?.message ?? JSON.stringify(event);
@@ -212,7 +220,8 @@ async function runClaudeLocal(
 
       if (errorMessage) {
         logger.error({ code, errorMessage, events }, "Claude returned an error");
-        reject(new Error(`Claude error: ${errorMessage}`));
+        const ErrorClass = /session\s*ID/i.test(errorMessage) ? ClaudeSessionError : Error;
+        reject(new ErrorClass(`Claude error: ${errorMessage}`));
       } else if (code !== 0 || !resultText) {
         logger.error({ code, events, stderr: stderr.slice(0, 500) }, "Claude exited with error");
         reject(new Error(resultText || `Claude exited with code ${code}`));
@@ -289,7 +298,8 @@ async function runClaudeRemote(
               resultText = event.result ?? "";
               resultSessionId = event.session_id ?? resultSessionId;
               if (event.is_error) {
-                errorMessage = resultText;
+                const errors = Array.isArray(event.errors) ? event.errors.join("; ") : "";
+                errorMessage = errors || resultText || "Unknown error";
               }
             } else if (event.type === "error") {
               errorMessage = event.error?.message ?? JSON.stringify(event);
@@ -302,7 +312,8 @@ async function runClaudeRemote(
         res.on("end", () => {
           if (errorMessage) {
             logger.error({ errorMessage, events }, "Claude returned an error (remote)");
-            reject(new Error(`Claude error: ${errorMessage}`));
+            const ErrorClass = /session\s*ID/i.test(errorMessage) ? ClaudeSessionError : Error;
+            reject(new ErrorClass(`Claude error: ${errorMessage}`));
           } else if (!resultText) {
             logger.error({ events }, "Claude returned empty result (remote)");
             reject(new Error("Claude returned an empty response"));

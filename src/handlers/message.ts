@@ -1,7 +1,7 @@
 import { WASocket, WAMessage } from "@whiskeysockets/baileys";
 import { logger } from "../utils/logger.js";
-import { runClaude } from "../claude/runner.js";
-import { getSessionId, setSessionId, withLock } from "../claude/session.js";
+import { runClaude, ClaudeSessionError } from "../claude/runner.js";
+import { getSessionId, setSessionId, resetSession, withLock } from "../claude/session.js";
 import { handleCommand } from "./commands.js";
 import { splitMessage } from "../utils/split.js";
 import { trackSentMessage } from "../whatsapp/client.js";
@@ -70,10 +70,22 @@ export async function handleMessage(
     }, 8000);
 
     try {
-      const sessionId = getSessionId(jid);
-      const result = await runClaude(prompt(text), sessionId, () => {
-        // onActivity callback — typing indicator already handled by interval
-      });
+      let sessionId = getSessionId(jid);
+      let result;
+      try {
+        result = await runClaude(prompt(text), sessionId, () => {
+          // onActivity callback — typing indicator already handled by interval
+        });
+      } catch (err) {
+        if (err instanceof ClaudeSessionError && sessionId) {
+          // Session no longer exists — reset and retry without resume
+          logger.warn({ jid, sessionId }, "Session not found, starting fresh");
+          resetSession(jid);
+          result = await runClaude(prompt(text), undefined, () => {});
+        } else {
+          throw err;
+        }
+      }
 
       // Save session for continuity
       if (result.sessionId) {
