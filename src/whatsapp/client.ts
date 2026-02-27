@@ -107,7 +107,12 @@ export async function startWhatsApp(): Promise<WASocket> {
           "Logged out (possible pairing failure). Clearing auth state and retrying...",
         );
         try {
-          await fs.rm(config.authDir, { recursive: true, force: true });
+          const entries = await fs.readdir(config.authDir);
+          await Promise.all(
+            entries.map((e) =>
+              fs.rm(`${config.authDir}/${e}`, { recursive: true, force: true }),
+            ),
+          );
         } catch (err) {
           logger.error({ err }, "Failed to clear auth state");
         }
