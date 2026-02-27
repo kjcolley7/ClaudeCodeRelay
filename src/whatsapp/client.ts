@@ -9,6 +9,7 @@ import makeWASocket, {
 import { Boom } from "@hapi/boom";
 import pino from "pino";
 import qrcode from "qrcode-terminal";
+import fs from "fs/promises";
 import { config } from "../config.js";
 import { logger } from "../utils/logger.js";
 
@@ -29,6 +30,12 @@ let messageHandler: MessageHandler | null = null;
 /** Exponential backoff state for reconnection */
 let reconnectDelay = 1000; // start at 1s
 const MAX_RECONNECT_DELAY = 60_000; // cap at 60s
+
+/** Track consecutive logouts to handle pairing failures gracefully */
+let logoutRetryCount = 0;
+const MAX_LOGOUT_RETRIES = 3;
+let stabilityTimer: ReturnType<typeof setTimeout> | null = null;
+const CONNECTION_STABILITY_MS = 30_000; // 30s = connection is "stable"
 
 /** Track message IDs sent by the relay so we can ignore our own messages in self-chats */
 const sentMessageIds = new Set<string>();
@@ -70,7 +77,7 @@ export async function startWhatsApp(): Promise<WASocket> {
 
   sock.ev.on("creds.update", saveCreds);
 
-  sock.ev.on("connection.update", (update) => {
+  sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
@@ -79,11 +86,33 @@ export async function startWhatsApp(): Promise<WASocket> {
     }
 
     if (connection === "close") {
-      const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
-      if (statusCode === DisconnectReason.loggedOut) {
-        logger.fatal("Logged out. Delete auth_info directory and restart to re-link.");
-        process.exit(1);
+      if (stabilityTimer) {
+        clearTimeout(stabilityTimer);
+        stabilityTimer = null;
       }
+
+      const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
+
+      if (statusCode === DisconnectReason.loggedOut) {
+        logoutRetryCount++;
+        if (logoutRetryCount > MAX_LOGOUT_RETRIES) {
+          logger.fatal(
+            "Logged out after %d retries. Delete auth_info directory and restart to re-link.",
+            MAX_LOGOUT_RETRIES,
+          );
+          process.exit(1);
+        }
+        logger.warn(
+          { attempt: logoutRetryCount, maxRetries: MAX_LOGOUT_RETRIES },
+          "Logged out (possible pairing failure). Clearing auth state and retrying...",
+        );
+        try {
+          await fs.rm(config.authDir, { recursive: true, force: true });
+        } catch (err) {
+          logger.error({ err }, "Failed to clear auth state");
+        }
+      }
+
       logger.warn({ statusCode, reconnectDelay }, "Connection closed, reconnecting...");
       const delay = reconnectDelay;
       reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
@@ -93,6 +122,12 @@ export async function startWhatsApp(): Promise<WASocket> {
     if (connection === "open") {
       reconnectDelay = 1000; // reset backoff on successful connection
       logger.info("WhatsApp connection established");
+      // Once connection is stable for 30s, reset the logout retry counter
+      if (stabilityTimer) clearTimeout(stabilityTimer);
+      stabilityTimer = setTimeout(() => {
+        logoutRetryCount = 0;
+        stabilityTimer = null;
+      }, CONNECTION_STABILITY_MS);
     }
   });
 
