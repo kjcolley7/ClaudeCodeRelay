@@ -12,7 +12,7 @@
     "dev:bridge": "tsx watch src/bridge-main.ts"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^7.0.0-rc.9",
+    "@whiskeysockets/baileys": "github:WhiskeySockets/Baileys",
     "pino": "^9.6.0",
     "qrcode-terminal": "^0.12.0"
   },
