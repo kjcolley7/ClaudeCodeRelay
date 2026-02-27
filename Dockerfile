@@ -1,6 +1,10 @@
 # ---- build stage ----
 FROM node:22-slim AS build
 
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && \
+    rm -rf /var/lib/apt/lists/* && \
+    git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -10,6 +14,10 @@ RUN npx tsc
 
 # ---- relay target ----
 FROM node:22-slim AS relay
+
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && \
+    rm -rf /var/lib/apt/lists/* && \
+    git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
 
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -21,8 +29,9 @@ CMD ["node", "dist/index.js"]
 # ---- claude target ----
 FROM node:22-slim AS claude
 
-RUN apt-get update && apt-get install -y --no-install-recommends git curl sudo && \
-    rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl sudo && \
+    rm -rf /var/lib/apt/lists/* && \
+    git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
 
 RUN npm install -g @anthropic-ai/claude-code
 
