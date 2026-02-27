@@ -26,6 +26,10 @@ export type MessageHandler = (
 let sock: WASocket | null = null;
 let messageHandler: MessageHandler | null = null;
 
+/** Exponential backoff state for reconnection */
+let reconnectDelay = 1000; // start at 1s
+const MAX_RECONNECT_DELAY = 60_000; // cap at 60s
+
 /** Track message IDs sent by the relay so we can ignore our own messages in self-chats */
 const sentMessageIds = new Set<string>();
 
@@ -48,6 +52,15 @@ export function trackSentMessage(id: string): void {
 }
 
 export async function startWhatsApp(): Promise<WASocket> {
+  // Clean up old socket to prevent listener/memory leaks on reconnect
+  if (sock) {
+    sock.ev.removeAllListeners("creds.update");
+    sock.ev.removeAllListeners("connection.update");
+    sock.ev.removeAllListeners("messages.upsert");
+    sock.end(new Error("Reconnecting"));
+    sock = null;
+  }
+
   const { state, saveCreds } = await useMultiFileAuthState(config.authDir);
 
   sock = makeWASocket({
@@ -71,11 +84,14 @@ export async function startWhatsApp(): Promise<WASocket> {
         logger.fatal("Logged out. Delete auth_info directory and restart to re-link.");
         process.exit(1);
       }
-      logger.warn({ statusCode }, "Connection closed, reconnecting...");
-      startWhatsApp();
+      logger.warn({ statusCode, reconnectDelay }, "Connection closed, reconnecting...");
+      const delay = reconnectDelay;
+      reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
+      setTimeout(() => startWhatsApp(), delay);
     }
 
     if (connection === "open") {
+      reconnectDelay = 1000; // reset backoff on successful connection
       logger.info("WhatsApp connection established");
     }
   });
