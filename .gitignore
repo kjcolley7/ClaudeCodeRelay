@@ -2,3 +2,4 @@ node_modules/
 dist/
 auth_info/
 *.log
+REPORT.md
