@@ -424,15 +424,45 @@ const server = http.createServer((req, res) => {
         Connection: "keep-alive",
       });
 
+      let timedOut = false;
       const timer = setTimeout(() => {
+        timedOut = true;
         proc.kill("SIGTERM");
         logger.warn({ timeout }, "Claude process timed out");
       }, timeout * 1000);
+
+      // Track partial text from assistant messages so we can recover on timeout
+      let partialText = "";
+      let lastSessionId: string | undefined;
 
       let stdoutBytes = 0;
       proc.stdout.on("data", (chunk: Buffer) => {
         stdoutBytes += chunk.length;
         res.write(chunk);
+
+        // Parse streamed events to accumulate partial text
+        const lines = chunk.toString().split("\n");
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const event = JSON.parse(line);
+            if (event.type === "assistant" && event.message?.content) {
+              for (const block of event.message.content) {
+                if (block.type === "text" && block.text) {
+                  partialText += block.text;
+                }
+              }
+            }
+            if (event.type === "system" && event.session_id) {
+              lastSessionId = event.session_id;
+            }
+            if (event.type === "result" && event.session_id) {
+              lastSessionId = event.session_id;
+            }
+          } catch {
+            // Non-JSON line, ignore
+          }
+        }
       });
 
       let stderr = "";
@@ -442,7 +472,20 @@ const server = http.createServer((req, res) => {
 
       proc.on("close", (code, signal) => {
         clearTimeout(timer);
-        if (code !== 0) {
+        if (timedOut && partialText) {
+          // Inject a synthetic result event with the partial text so the relay gets something
+          const syntheticResult = JSON.stringify({
+            type: "result",
+            result: partialText + "\n\n_(Response truncated — Claude timed out)_",
+            session_id: lastSessionId ?? "",
+            is_error: false,
+          });
+          res.write(syntheticResult + "\n");
+          logger.warn(
+            { stdoutBytes, partialTextLen: partialText.length },
+            "Claude timed out, injected partial result"
+          );
+        } else if (code !== 0) {
           logger.error(
             { code, signal, stderr: stderr.slice(0, 500), stdoutBytes },
             "Claude exited with error"

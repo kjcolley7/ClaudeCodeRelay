@@ -302,6 +302,8 @@ async function runClaudeRemote(
         let errorMessage = "";
         let resultUsage: ClaudeUsage | undefined;
         const events: unknown[] = [];
+        // Track partial text from assistant messages as fallback for timeout
+        let partialText = "";
 
         const rl = createInterface({ input: res });
 
@@ -326,6 +328,14 @@ async function runClaudeRemote(
                 const errors = Array.isArray(event.errors) ? event.errors.join("; ") : "";
                 errorMessage = errors || resultText || "Unknown error";
               }
+            } else if (event.type === "assistant" && event.message?.content) {
+              for (const block of event.message.content) {
+                if (block.type === "text" && block.text) {
+                  partialText += block.text;
+                }
+              }
+            } else if (event.type === "system" && event.session_id) {
+              resultSessionId = event.session_id;
             } else if (event.type === "error") {
               errorMessage = event.error?.message ?? JSON.stringify(event);
             }
@@ -339,6 +349,17 @@ async function runClaudeRemote(
             logger.error({ errorMessage, events }, "Claude returned an error (remote)");
             const ErrorClass = /session\s*ID/i.test(errorMessage) ? ClaudeSessionError : Error;
             reject(new ErrorClass(`Claude error: ${errorMessage}`));
+          } else if (!resultText && partialText) {
+            // Timeout or unexpected close — use partial text as fallback
+            logger.warn(
+              { sessionId: resultSessionId, partialTextLen: partialText.length },
+              "Claude stream ended without result event, using partial text"
+            );
+            resolve({
+              text: partialText + "\n\n_(Response truncated — Claude timed out)_",
+              sessionId: resultSessionId,
+              usage: resultUsage,
+            });
           } else if (!resultText) {
             logger.error({ events }, "Claude returned empty result (remote)");
             reject(new Error("Claude returned an empty response"));

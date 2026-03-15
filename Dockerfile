@@ -24,6 +24,9 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY --from=build /app/dist dist/
 
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD node -e "process.exit(0)" || exit 1
+
 CMD ["node", "dist/index.js"]
 
 # ---- claude target ----
