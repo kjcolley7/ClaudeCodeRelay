@@ -5,4 +5,5 @@ export const config = {
   authDir: "./auth_info",
   claudeServiceUrl: process.env.CLAUDE_SERVICE_URL ?? "",
   bridgePort: parseInt(process.env.BRIDGE_PORT ?? "3100", 10),
+  healthPort: parseInt(process.env.HEALTH_PORT ?? "3200", 10),
 };

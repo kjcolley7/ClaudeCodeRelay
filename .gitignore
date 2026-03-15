@@ -3,3 +3,4 @@ dist/
 auth_info/
 *.log
 REPORT.md
+.env

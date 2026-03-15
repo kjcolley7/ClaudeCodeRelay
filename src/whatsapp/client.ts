@@ -37,6 +37,12 @@ const MAX_LOGOUT_RETRIES = 3;
 let stabilityTimer: ReturnType<typeof setTimeout> | null = null;
 const CONNECTION_STABILITY_MS = 30_000; // 30s = connection is "stable"
 
+/** Connection health tracking */
+let lastConnectedAt = 0;
+let connectionOpen = false;
+/** Debounce window: connection must be down this long before reporting unhealthy */
+const HEALTH_DEBOUNCE_MS = 120_000; // 2 minutes
+
 /** Track message IDs sent by the relay so we can ignore our own messages in self-chats */
 const sentMessageIds = new Set<string>();
 
@@ -46,6 +52,27 @@ export function onMessage(handler: MessageHandler): void {
 
 export function getSocket(): WASocket | null {
   return sock;
+}
+
+export interface HealthStatus {
+  healthy: boolean;
+  connected: boolean;
+  lastConnectedAt: number;
+  disconnectedForMs: number | null;
+}
+
+/**
+ * Returns relay health status with debouncing.
+ * Healthy if: connected, OR disconnected for less than the debounce window,
+ * OR never connected yet (still starting up).
+ */
+export function getHealthStatus(): HealthStatus {
+  const now = Date.now();
+  const disconnectedForMs = connectionOpen ? null : (lastConnectedAt > 0 ? now - lastConnectedAt : null);
+  const healthy = connectionOpen
+    || lastConnectedAt === 0  // still starting up, not unhealthy yet
+    || (disconnectedForMs !== null && disconnectedForMs < HEALTH_DEBOUNCE_MS);
+  return { healthy, connected: connectionOpen, lastConnectedAt, disconnectedForMs };
 }
 
 /**
@@ -86,6 +113,7 @@ export async function startWhatsApp(): Promise<WASocket> {
     }
 
     if (connection === "close") {
+      connectionOpen = false;
       if (stabilityTimer) {
         clearTimeout(stabilityTimer);
         stabilityTimer = null;
@@ -125,6 +153,8 @@ export async function startWhatsApp(): Promise<WASocket> {
     }
 
     if (connection === "open") {
+      connectionOpen = true;
+      lastConnectedAt = Date.now();
       reconnectDelay = 1000; // reset backoff on successful connection
       logger.info("WhatsApp connection established");
       // Once connection is stable for 30s, reset the logout retry counter

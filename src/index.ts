@@ -1,4 +1,5 @@
-import { startWhatsApp, onMessage } from "./whatsapp/client.js";
+import http from "node:http";
+import { startWhatsApp, onMessage, getHealthStatus } from "./whatsapp/client.js";
 import { handleMessage } from "./handlers/message.js";
 import { logger } from "./utils/logger.js";
 import { config } from "./config.js";
@@ -23,6 +24,17 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
 
 async function main(): Promise<void> {
   logger.info({ workingDirectory: config.workingDirectory }, "Starting ClaudeCodeRelay");
+
+  // Health check HTTP server for Docker
+  const healthServer = http.createServer((_req, res) => {
+    const status = getHealthStatus();
+    const code = status.healthy ? 200 : 503;
+    res.writeHead(code, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(status));
+  });
+  healthServer.listen(config.healthPort, () => {
+    logger.info({ port: config.healthPort }, "Health check server listening");
+  });
 
   onMessage(handleMessage);
   const sock = await startWhatsApp();
