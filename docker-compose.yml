@@ -21,6 +21,7 @@ services:
     build:
       context: .
       target: claude
+    init: true
     restart: unless-stopped
     environment:
       CLAUDE_TIMEOUT: "${CLAUDE_TIMEOUT:-300}"
